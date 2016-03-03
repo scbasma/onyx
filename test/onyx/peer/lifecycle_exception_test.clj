@@ -44,6 +44,21 @@
   (when (= @exception-thrower :after-batch)
     (reset! exception-thrower nil)
     (>!! @in-chan :done)
+    (>!! @in-chan :done)
+    (>!! @in-chan :done)
+    (>!! @in-chan :done)
+    (>!! @in-chan :done)
+    (>!! @in-chan :done)
+    (>!! @in-chan :done)
+    (>!! @in-chan :done)
+    (>!! @in-chan :done)
+    (>!! @in-chan :done)
+    (>!! @in-chan :done)
+    (>!! @in-chan :done)
+    (>!! @in-chan :done)
+    (>!! @in-chan :done)
+    (>!! @in-chan :done)
+    (>!! @in-chan :done)
     (close! @in-chan)
     (throw (ex-info "Threw exception in after-batch" {})))
   {})
@@ -115,8 +130,8 @@
                     {:lifecycle/task :out
                      :lifecycle/calls :onyx.plugin.core-async/writer-calls}]]
 
-    (reset! in-chan (chan (inc n-messages)))
-    (reset! out-chan (chan (sliding-buffer (inc n-messages))))
+    (reset! in-chan (chan 5000 #_(inc n-messages)))
+    (reset! out-chan (chan 5000 #_(sliding-buffer (inc n-messages))))
 
     (with-test-env [test-env [5 env-config peer-config]]
       (let [job-id

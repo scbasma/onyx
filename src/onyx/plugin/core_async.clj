@@ -77,9 +77,10 @@
                   (<!! timeout-ch))]
       (doseq [m batch]
         (swap! pending-messages assoc (:id m) (:message m)))
-      (when (and (= 1 (count @pending-messages))
-                 (= (count batch) 1)
-                 (= (:message (first batch)) :done)
+      (when (and (pos? (count batch))
+                 (not (some (complement #{:done}) 
+                            (concat (map :message batch) 
+                                    (vals @pending-messages))))
                  (zero? (count (.buf retry-ch))))
         (reset! drained true))
       {:onyx.core/batch batch}))
