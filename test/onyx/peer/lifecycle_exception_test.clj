@@ -117,7 +117,7 @@
     (reset! in-chan (chan (inc n-messages)))
     (reset! out-chan (chan (sliding-buffer (inc n-messages))))
 
-    (with-test-env [test-env [3 env-config peer-config]]
+    (with-test-env [test-env [5 env-config peer-config]]
       (let [job-id
             (:job-id
              (onyx.api/submit-job peer-config

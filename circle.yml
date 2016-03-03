@@ -4,11 +4,58 @@ general:
 
 test:
   override:
-    - ./scripts/circle-runner.sh aeron clojure-1.7 :all:
-        timeout: 480
-        parallel: true
-    - ./scripts/circle-runner.sh aeron clojure-1.8 :smoke:
-        timeout: 120
+    - lein test onyx.peer.lifecycle-exception-test
+    - lein test onyx.peer.lifecycle-exception-test
+    - lein test onyx.peer.lifecycle-exception-test
+    - lein test onyx.peer.lifecycle-exception-test
+    - lein test onyx.peer.lifecycle-exception-test
+    - lein test onyx.peer.lifecycle-exception-test
+    - lein test onyx.peer.lifecycle-exception-test
+    - lein test onyx.peer.lifecycle-exception-test
+    - lein test onyx.peer.lifecycle-exception-test
+    - lein test onyx.peer.lifecycle-exception-test
+    - lein test onyx.peer.lifecycle-exception-test
+    - lein test onyx.peer.lifecycle-exception-test
+    - lein test onyx.peer.lifecycle-exception-test
+    - lein test onyx.peer.lifecycle-exception-test
+    - lein test onyx.peer.lifecycle-exception-test
+    - lein test onyx.peer.lifecycle-exception-test
+    - lein test onyx.peer.lifecycle-exception-test
+    - lein test onyx.peer.lifecycle-exception-test
+    - lein test onyx.peer.lifecycle-exception-test
+    - lein test onyx.peer.lifecycle-exception-test
+    - lein test onyx.peer.lifecycle-exception-test
+    - lein test onyx.peer.lifecycle-exception-test
+    - lein test onyx.peer.lifecycle-exception-test
+    - lein test onyx.peer.lifecycle-exception-test
+    - lein test onyx.peer.lifecycle-exception-test
+    - lein test onyx.peer.lifecycle-exception-test
+    - lein test onyx.peer.lifecycle-exception-test
+    - lein test onyx.peer.lifecycle-exception-test
+    - lein test onyx.peer.lifecycle-exception-test
+    - lein test onyx.peer.lifecycle-exception-test
+    - lein test onyx.peer.lifecycle-exception-test
+    - lein test onyx.peer.lifecycle-exception-test
+    - lein test onyx.peer.lifecycle-exception-test
+    - lein test onyx.peer.lifecycle-exception-test
+    - lein test onyx.peer.lifecycle-exception-test
+    - lein test onyx.peer.lifecycle-exception-test
+    - lein test onyx.peer.lifecycle-exception-test
+    - lein test onyx.peer.lifecycle-exception-test
+    - lein test onyx.peer.lifecycle-exception-test
+    - lein test onyx.peer.lifecycle-exception-test
+    - lein test onyx.peer.lifecycle-exception-test
+    - lein test onyx.peer.lifecycle-exception-test
+    - lein test onyx.peer.lifecycle-exception-test
+    - lein test onyx.peer.lifecycle-exception-test
+    - lein test onyx.peer.lifecycle-exception-test
+    - lein test onyx.peer.lifecycle-exception-test
+    - lein test onyx.peer.lifecycle-exception-test
+    - lein test onyx.peer.lifecycle-exception-test
+    - lein test onyx.peer.lifecycle-exception-test
+    - lein test onyx.peer.lifecycle-exception-test
+    - lein test onyx.peer.lifecycle-exception-test
+    - lein test onyx.peer.lifecycle-exception-test
 
 machine:
   java:
