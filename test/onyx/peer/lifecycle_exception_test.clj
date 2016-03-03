@@ -91,6 +91,7 @@
 
                  {:onyx/name :inc
                   :onyx/fn ::my-inc
+                  :onyx/max-peers 1
                   :onyx/type :function
                   :onyx/batch-size batch-size}
 
