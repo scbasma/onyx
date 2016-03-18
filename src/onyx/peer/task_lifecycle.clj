@@ -524,6 +524,7 @@
         component)))
 
   (stop [component]
+    (println "LF EVENT" (:lifecycle-event component))
     (if-let [task-name (:onyx.core/task (:pipeline-data component))]
       (info (:log-prefix component) "Stopping task lifecycle")
       (warn (:log-prefix component) "Stopping task lifecycle, failed to initialize task set up"))

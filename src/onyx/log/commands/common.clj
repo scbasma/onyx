@@ -129,13 +129,14 @@
                                        peers))))
              (allocations job-id))))
 
-(defn start-new-lifecycle [old new diff state]
+(defn start-new-lifecycle [old new diff state & [lifecycle-event]]
   (let [old-allocation (peer->allocated-job (:allocations old) (:id state))
         new-allocation (peer->allocated-job (:allocations new) (:id state))]
     (if (not= old-allocation new-allocation)
       (do (when (:lifecycle state)
             (close! (:task-kill-ch (:task-state state)))
-            (component/stop @(:lifecycle state)))
+            (println (keys @(:lifecycle state)))
+            (component/stop (assoc-in @(:lifecycle state) [:task-lifecycle :lifecycle-event] lifecycle-event)))
           (if (not (nil? new-allocation))
             (let [seal-ch (chan)
                   task-kill-ch (chan)

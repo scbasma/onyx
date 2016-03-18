@@ -45,4 +45,4 @@
 
 (s/defmethod extensions/fire-side-effects! :seal-output :- State
   [{:keys [args]} old new diff state]
-  (common/start-new-lifecycle old new diff state))
+  (common/start-new-lifecycle old new diff state {:event :completed-job :id (:job args)}))
