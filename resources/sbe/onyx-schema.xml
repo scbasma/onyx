@@ -1,0 +1,51 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<sbe:messageSchema xmlns:sbe="http://www.fixprotocol.org/ns/simple/RC3"
+                   package="onyxserializer"
+                   id="1"
+                   version="0"
+                   semanticVersion="5.2"
+                   description="Onyx communications schema"
+                   byteOrder="littleEndian">
+    <types>
+        <composite name="messageHeader" description="Message identifiers and length of message root">
+            <type name="blockLength" primitiveType="uint16"/>
+            <type name="templateId" primitiveType="uint16"/>
+            <type name="schemaId" primitiveType="uint16"/>
+            <type name="version" primitiveType="uint16"/>
+        </composite>
+	<composite name="groupSizeEncoding" description="Repeating group dimensions">
+            <type name="blockLength" primitiveType="uint16"/>
+            <type name="numInGroup" primitiveType="uint8"/>
+        </composite>
+        <composite name="varDataEncoding">
+            <type name="length" primitiveType="uint16"/>
+            <type name="varData" primitiveType="uint8" length="0" characterEncoding="UTF-8"/>
+        </composite>
+        <composite name="varBytes">
+            <type name="length" primitiveType="uint32" maxValue="2147483647"/>
+            <type name="varData" primitiveType="int8"/>
+        </composite>
+	<type name="taskNums" primitiveType="uint16" length="8"/>
+	<type name="taskNum" primitiveType="uint16"/>
+	<type name="peerNum" primitiveType="uint16"/>
+	<type name="peerId" primitiveType="int64" length="2"/>
+	<type name="taskId" primitiveType="int64" length="2"/>
+	<type name="replicaVersion" primitiveType="uint32"/>
+        <enum name="TypeEnum" encodingType="uint8">
+            <validValue name="Keyword">0</validValue>
+            <validValue name="String">1</validValue>
+        </enum>
+    </types>
+    <sbe:message name="MessageContainer" id="0" description="Container for message from peer to peer">
+        <field name="replicaVersion" id="1" type="replicaVersion"/>
+        <field name="fromPeerNum" id="22" type="peerNum"/>
+        <field name="toTaskNums" id="23" type="taskNums"/>
+	<data name="payload" id="24" type="varBytes"/>
+    </sbe:message>
+    <sbe:message name="Barrier" id="25" description="ABS Barrier">
+        <field name="fromTaskNum" id="26" type="taskNum"/>
+        <field name="toTaskNum" id="27" type="taskNum"/>
+        <field name="replicaVersion" id="29" type="replicaVersion"/>
+        <data name="replica" id="28" type="varDataEncoding"/>
+    </sbe:message>
+</sbe:messageSchema>

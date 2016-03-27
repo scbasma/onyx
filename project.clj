@@ -33,6 +33,8 @@
                  [log4j/log4j "1.2.17"]
                  [clj-tuple "0.2.2"]]
   :jvm-opts ["-Xmx4g" "-XX:-OmitStackTraceInFastThrow"]
+  :java-source-paths ["src/java/serializer/onyxserializer"]
+  :aliases {"build-serializers" ["do" ["with-profile" "sbetool" "run" "-m" "uk.co.real_logic.sbe.SbeTool" "resources/sbe/onyx-schema.xml"] ["javac"]]}
   :profiles {:dev {:dependencies [[org.clojure/tools.nrepl "0.2.11"]
                                   [table "0.5.0"]
                                   [org.clojure/test.check "0.9.0"]
@@ -46,6 +48,8 @@
              :reflection-check {:global-vars {*warn-on-reflection* true
                                               *assert* false
                                               *unchecked-math* :warn-on-boxed}}
+             :sbetool {:dependencies [[uk.co.real-logic/sbe-all "1.3.3-RC3"]]
+                       :jvm-opts ["-Dsbe.output.dir=src/java/serializer" "-Dsbe.target.language=Java" "-Dsbe.validation.stop.on.error=true"]}
              :circle-ci {:jvm-opts ["-Xmx2500M"
                                     "-XX:+UnlockCommercialFeatures"
                                     "-XX:+FlightRecorder"
