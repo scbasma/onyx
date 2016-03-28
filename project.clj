@@ -33,8 +33,8 @@
                  [log4j/log4j "1.2.17"]
                  [clj-tuple "0.2.2"]]
   :jvm-opts ["-Xmx4g" "-XX:-OmitStackTraceInFastThrow"]
-  :java-source-paths ["src/java/serializer/onyxserializer"]
-  :aliases {"build-serializers" ["do" ["with-profile" "sbetool" "run" "-m" "uk.co.real_logic.sbe.SbeTool" "resources/sbe/onyx-schema.xml"] ["javac"]]}
+  :java-source-paths ["src/java/onyx_codec"]
+  :aliases {"build-codecs" ["do" ["with-profile" "sbetool" "run" "-m" "uk.co.real_logic.sbe.SbeTool" "resources/sbe/onyx-schema.xml"] ["javac"]]}
   :profiles {:dev {:dependencies [[org.clojure/tools.nrepl "0.2.11"]
                                   [table "0.5.0"]
                                   [org.clojure/test.check "0.9.0"]
@@ -44,12 +44,21 @@
                    :plugins [[lein-jammin "0.1.1"]
                              [lein-set-version "0.4.1"]
                              [lonocloud/lein-unison "0.1.13"]
-                             [codox "0.8.8"]]}
+                             [codox "0.8.8"]]
+                   :java-opts ^:replace ["-server" 
+                                         "-Xmx6g"
+                                         "-XX:BiasedLockingStartupDelay=0" 
+                                         "-Daeron.mtu.length=16384" 
+                                         "-Daeron.socket.so_sndbuf=6710884" 
+                                         "-Daeron.socket.so_rcvbuf=6710884" 
+                                         "-Daeron.rcv.buffer.length=16384" 
+                                         "-Daeron.rcv.initial.window.length=6710884" 
+                                         "-Dagrona.disable.bounds.checks=true"]}
              :reflection-check {:global-vars {*warn-on-reflection* true
                                               *assert* false
                                               *unchecked-math* :warn-on-boxed}}
              :sbetool {:dependencies [[uk.co.real-logic/sbe-all "1.3.3-RC3"]]
-                       :jvm-opts ["-Dsbe.output.dir=src/java/serializer" "-Dsbe.target.language=Java" "-Dsbe.validation.stop.on.error=true"]}
+                       :jvm-opts ["-Dsbe.output.dir=src/java" "-Dsbe.target.language=Java" "-Dsbe.validation.stop.on.error=true"]}
              :circle-ci {:jvm-opts ["-Xmx2500M"
                                     "-XX:+UnlockCommercialFeatures"
                                     "-XX:+FlightRecorder"

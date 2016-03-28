@@ -1,11 +1,12 @@
 (ns onyx.messaging.protocol
-  (:import [baseline SegmentEncoder SegmentDecoder TypeEnum AnyTypeEncoder AnyTypeDecoder BarrierEncoder BarrierDecoder MessageContainerEncoder MessageContainerDecoder]
+  (:import ;[baseline SegmentEncoder SegmentDecoder TypeEnum AnyTypeEncoder AnyTypeDecoder BarrierEncoder BarrierDecoder MessageContainerEncoder MessageContainerDecoder]
            [uk.co.real_logic.agrona.concurrent UnsafeBuffer]))
 
 (defn new-buffer []
   (let [ba (byte-array 1000)] 
     (UnsafeBuffer. ba)))
 
+(comment
 (def encoder (MessageContainerEncoder.))
 
 (def decoder (MessageContainerDecoder.))
@@ -31,14 +32,13 @@
 (def length (.encodedLength encoded))
 
 
-(comment
  
  
   (.string (.wrap decoder buffer 0) 0)
   
-  )
 
 
 (def decoded
   (-> (.wrap decoder buffer 0 length 0)
       (.toTaskNums 1))) 
+  )
