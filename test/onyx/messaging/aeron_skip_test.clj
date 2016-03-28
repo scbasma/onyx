@@ -77,79 +77,135 @@
 
 
 (deftest test-speed
-  (let [media-driver-context (-> (MediaDriver$Context.) 
-                                 ;(.threadingMode ThreadingMode/SHARED)
-                                 (.dirsDeleteOnStart true))
-        media-driver ^MediaDriver (MediaDriver/launch media-driver-context)]
+  (let [media-driver1 ^MediaDriver (MediaDriver/launchEmbedded)
+        dir-name1 (.aeronDirectoryName media-driver1)
+        _ (println "dir name is " dir-name1)
+        media-driver2 ^MediaDriver (MediaDriver/launchEmbedded)
+        dir-name2 (.aeronDirectoryName media-driver2)
+        _ (println "dir name is " dir-name2)
+
+        ]
     (try
-     (let [ctx (.errorHandler (Aeron$Context.) no-op-error-handler)
-           conn (Aeron/connect ctx)
-           channel (aeron-channel "127.0.0.1" 40200)
-           stream-id 1
-           publication1 (.addPublication conn channel stream-id)
-           publication2 (.addPublication (Aeron/connect ctx) channel stream-id)
-           _ (println "Termbuffer length " (.termBufferLength publication1))
-           subscription1 (.addSubscription conn channel stream-id)
-           ;subscription2 (.addSubscription conn channel stream-id)
-           ;subscription3 (.addSubscription conn channel stream-id)
-           ;subscription4 (.addSubscription conn channel stream-id)
-           ;subscription5 (.addSubscription conn channel stream-id)
-           ;subscription6 (.addSubscription conn channel stream-id)
-           ;subscription7 (.addSubscription conn channel stream-id)
-           ;subscription8 (.addSubscription conn channel stream-id)
-           size 40
-           bs (byte-array size)
-           buf (UnsafeBuffer. bs)
-           sent-messages (atom 0)
-           read-messages (atom 0)
-           handle-message (fn [buffer offset length header]
-                            (swap! read-messages inc))
-           controlled-handle-message (fn [buffer offset length header]
-                                       (swap! read-messages inc)
-                                       ControlledFragmentHandler$Action/CONTINUE)
-           controlled-handler (controlled-data-handler controlled-handle-message)
-           fragment-assembler (data-handler handle-message)
-           _ (while (not (= -2 (.offer ^Publication publication1 buf 0 size))) 
-               (swap! sent-messages inc))
-           _ (println "Sent 1 " @sent-messages)
-           _ (println "Limits " 
-                      (.positionLimit publication1) 
-                      (.positionLimit publication2)
-                      (.position publication1)
-                      (.position publication2))
-           _ (while (not (= -2 (.offer ^Publication publication2 buf 0 size))) 
-               (swap! sent-messages inc))
-           _ (println "Sent 2 " @sent-messages)
-           offer-fut 
-           (future
-                      #_(while (not (Thread/interrupted)) 
-                        (let [offer-result (.offer ^Publication publication1 buf 0 size)]
-                          (when-not (neg? offer-result)
-                            (swap! sent-messages inc)))))
+      (let [ctx1 (.errorHandler (.aeronDirectoryName (Aeron$Context.) dir-name1) no-op-error-handler)
+            conn1 (Aeron/connect ctx1)
 
-           ;;; You're allowed to produce to a publication if the previous barrier was consumed or you're below X%
+            ctx2 (.errorHandler (.aeronDirectoryName (Aeron$Context.) dir-name2) no-op-error-handler)
+            conn2 (Aeron/connect ctx2)
 
-           receive-fut (future
-                        (while (not (Thread/interrupted)) 
-                          (.controlledPoll ^Subscription subscription1 ^ControlledFragmentHandler controlled-handler 10)
-                          (println "Limits " 
-                                   (.positionLimit publication1) 
-                                   (.positionLimit publication2)
-                                   (.position publication1)
-                                   (.position publication2))
-                          ;(.controlledPoll ^Subscription subscription2 ^ControlledFragmentHandler controlled-handler 10)
-                          ;(.controlledPoll ^Subscription subscription3 ^ControlledFragmentHandler controlled-handler 10)
-                          ;(.controlledPoll ^Subscription subscription4 ^ControlledFragmentHandler controlled-handler 10)
-                          ;(.controlledPoll ^Subscription subscription5 ^ControlledFragmentHandler controlled-handler 10)
-                          ;(.controlledPoll ^Subscription subscription6 ^ControlledFragmentHandler controlled-handler 10)
-                          ;(.controlledPoll ^Subscription subscription7 ^ControlledFragmentHandler controlled-handler 10)
-                          ;(.controlledPoll ^Subscription subscription8 ^ControlledFragmentHandler controlled-handler 10)
-                          ))]
+            channel (aeron-channel "127.0.0.1" 40200)
+            stream-id 1
+            publication1 (.addPublication conn1 channel stream-id)
+            publication2 (.addPublication conn1 channel stream-id)
+
+            publication3 (.addPublication conn2 channel stream-id)
+            _ (println "Termbuffer length " (.termBufferLength publication1))
+            subscription1 (.addSubscription conn2 channel stream-id)
+            ;subscription2 (.addSubscription conn channel stream-id)
+            ;subscription3 (.addSubscription conn channel stream-id)
+            ;subscription4 (.addSubscription conn channel stream-id)
+            ;subscription5 (.addSubscription conn channel stream-id)
+            ;subscription6 (.addSubscription conn channel stream-id)
+            ;subscription7 (.addSubscription conn channel stream-id)
+            ;subscription8 (.addSubscription conn channel stream-id)
+            size 40
+            bs (byte-array size)
+            buf (UnsafeBuffer. bs)
+            sent-messages (atom 0)
+            read-messages (atom 0)
+            handle-message (fn [buffer offset length header]
+                             (swap! read-messages inc))
+            controlled-handle-message (fn [buffer offset length header]
+                                        (swap! read-messages inc)
+                                        ControlledFragmentHandler$Action/CONTINUE)
+            controlled-handler (controlled-data-handler controlled-handle-message)
+            fragment-assembler (data-handler handle-message)
+            _ (while (not (= -2 (.offer ^Publication publication1 buf 0 size))) 
+                (swap! sent-messages inc))
+            _ (println "Sent 1 " @sent-messages)
+            _ (println "Limits " 
+                       (.positionLimit publication1) 
+                       (.positionLimit publication2)
+                       (.positionLimit publication3)
+                       "positions"
+                       (.position publication1)
+                       (.position publication2)
+                       (.position publication3))
+            _ (println "sleeping for a bit to catch up")
+            _ (Thread/sleep 10000)
+            _ (println "LimitsS" 
+                       (.positionLimit publication1) 
+                       (.positionLimit publication2)
+                       (.positionLimit publication3)
+                       "positions"
+                       (.position publication1)
+                       (.position publication2)
+                       (.position publication3))
+
+
+            _ (while (not (= -2 (.offer ^Publication publication1 buf 0 size))) 
+                (swap! sent-messages inc))
+            _ (println "Sent on pub 1 again " @sent-messages)
+            _ (println "Limits " 
+                       (.positionLimit publication1) 
+                       (.positionLimit publication2)
+                       (.positionLimit publication3)
+                       "positions"
+                       (.position publication1)
+                       (.position publication2)
+                       (.position publication3))
+
+            _ (while (not (= -2 (.offer ^Publication publication2 buf 0 size))) 
+                (swap! sent-messages inc))
+            _ (println "Sent pub 2 " @sent-messages)
+            _ (while (not (= -2 (.offer ^Publication publication3 buf 0 size))) 
+                (swap! sent-messages inc))
+            _ (println "Sent 3 " @sent-messages)
+            offer-fut 
+            (future
+              #_(while (not (Thread/interrupted)) 
+                  (let [offer-result (.offer ^Publication publication1 buf 0 size)]
+                    (when-not (neg? offer-result)
+                      (swap! sent-messages inc)))))
+
+            _ (Thread/sleep 1000)
+
+            _ (println "Lim b4 " 
+                       (.positionLimit publication1) 
+                       (.positionLimit publication2)
+                       (.positionLimit publication3)
+                       "positions"
+                       (.position publication1)
+                       (.position publication2)
+                       (.position publication3)
+                 )
+
+            ;;; You're allowed to produce to a publication if the previous barrier was consumed or you're below X%
+
+            receive-fut (future
+                          (while (not (Thread/interrupted)) 
+                            (.controlledPoll ^Subscription subscription1 ^ControlledFragmentHandler controlled-handler 10)
+
+                            ;(.controlledPoll ^Subscription subscription2 ^ControlledFragmentHandler controlled-handler 10)
+                            ;(.controlledPoll ^Subscription subscription3 ^ControlledFragmentHandler controlled-handler 10)
+                            ;(.controlledPoll ^Subscription subscription4 ^ControlledFragmentHandler controlled-handler 10)
+                            ;(.controlledPoll ^Subscription subscription5 ^ControlledFragmentHandler controlled-handler 10)
+                            ;(.controlledPoll ^Subscription subscription6 ^ControlledFragmentHandler controlled-handler 10)
+                            ;(.controlledPoll ^Subscription subscription7 ^ControlledFragmentHandler controlled-handler 10)
+                            ;(.controlledPoll ^Subscription subscription8 ^ControlledFragmentHandler controlled-handler 10)
+                            ))]
        (try
-        (Thread/sleep 10000)
+        (Thread/sleep 20000)
         (println @sent-messages)
         (println @read-messages)
-        
+        (println "Limits " 
+                 (.positionLimit publication1) 
+                 (.positionLimit publication2)
+                 (.positionLimit publication3)
+                 "positions"
+                 (.position publication1)
+                 (.position publication2)
+                 (.position publication3)
+                 )
         (finally
          (future-cancel offer-fut)
          (future-cancel receive-fut)))
@@ -159,4 +215,6 @@
 
        )
      (finally
-      (.close media-driver)))))
+      (.close media-driver1)
+      (.close media-driver2)
+      ))))
