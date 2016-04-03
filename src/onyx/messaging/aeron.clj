@@ -67,7 +67,6 @@
     
     (let [this-msg-index (get-in @global-watermarks [dst-task-id src-peer :high-water-mark])
           k [(or dst-task-id :ack-msg) (.position header) (.sessionId header)]
-          _ (info "Adding 3 under " k)
           m-id (get @position-assert-state k)] 
       (assert (or (nil? m-id) (= m-id this-msg-index)) (str "differing message-id found between subscribers " m-id " " this-msg-index))
       (when-not m-id (swap! position-assert-state assoc k this-msg-index)))
@@ -298,7 +297,6 @@
 
                   (let [k [task-id (.position header) (.sessionId header)]
                         m-id (get @position-assert-state k)] 
-                    (info "Adding 1 under " k)
                     (assert (or (nil? m-id) (= m-id this-msg-index)) (str "differing message-id found between subscribers " m-id " " this-msg-index))
                     (when-not m-id (swap! position-assert-state assoc k this-msg-index)))
 
@@ -310,7 +308,6 @@
 
                   (let [k [task-id (.position header) (.sessionId header)]
                         m-id (get @position-assert-state k)] 
-                    (info "Adding 2 under " k)
                     (assert (or (nil? m-id) (= m-id this-msg-index)) (str "differing message-id found between subscribers " m-id " " this-msg-index))
                     (when-not m-id (swap! position-assert-state assoc k this-msg-index)))
 
