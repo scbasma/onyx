@@ -406,17 +406,15 @@
       -1
       (let [barriers* (unseen-barriers barriers my-peer-id)
             nearest-barrier (first (sort (keys barriers*)))
+            _ (info "min out of " (first (sort (keys barriers*))) (sort (keys barriers*)))
             nearest-barrier-pos (get barrier-index nearest-barrier high-water-mark)
-            new-low (inc low-water-mark)
-            new-high (+ new-low (dec take-n))
-            result
-            (cond (> new-high high-water-mark)
-                  [new-low high-water-mark]
-
-                  (< nearest-barrier-pos new-high)
-                  [new-low nearest-barrier-pos]
-
-                  :else [new-low new-high])]
+            ;; Must bound both by nearest-barrier-pos as neither low nor high should
+            ;; be past the barrier.
+            new-low (min (inc low-water-mark) nearest-barrier-pos)
+            ;; New high must be bounded by both nearest-barrier-pos which defaults to high-water-mark if not present
+            new-high (min (+ new-low (dec take-n)) nearest-barrier-pos)
+            result [new-low new-high]]
+        (info low-water-mark high-water-mark nearest-barrier-pos take-n result)
         (when nearest-barrier
           (assert (>= nearest-barrier-pos (first result))
                   {:msg "Next barrier is behind the lower ticket bound"
