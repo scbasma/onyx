@@ -52,6 +52,8 @@
           (assoc-in [dst-task-id src-peer :barrier-index (:barrier-epoch res)] hw))
       gw*)))
 
+(def position-assert-state (atom {}))
+
 (defn global-stream-observer-handler [global-watermarks buffer offset length header]
   (let [ba (byte-array length)
         _ (.getBytes buffer offset ba)
@@ -59,8 +61,18 @@
         src-peer (:src-peer-id res)
         dst-task-id (:dst-task-id res)
         barrier? (instance? onyx.types.Barrier res)]
+
     (when-not (= :job-completed (:type res))
-      (swap! global-watermarks update-global-watermarks dst-task-id src-peer res barrier?))))
+      (swap! global-watermarks update-global-watermarks dst-task-id src-peer res barrier?))
+    
+    (let [this-msg-index (get-in @global-watermarks [dst-task-id src-peer :high-water-mark])
+          k [(or dst-task-id :ack-msg) (.position header) (.sessionId header)]
+          _ (info "Adding 3 under " k)
+          m-id (get @position-assert-state k)] 
+      (assert (or (nil? m-id) (= m-id this-msg-index)) (str "differing message-id found between subscribers " m-id " " this-msg-index))
+      (when-not m-id (swap! position-assert-state assoc k this-msg-index)))
+
+    ))
 
 (defn global-fragment-data-handler [f]
   (FragmentAssembler.
@@ -142,6 +154,7 @@
   component/Lifecycle
   (start [component]
     (taoensso.timbre/info "Starting Aeron Peer Group")
+    (reset! position-assert-state {})
     (let [embedded-driver? (arg-or-default :onyx.messaging.aeron/embedded-driver? opts)
           threading-mode (get-threading-model (arg-or-default :onyx.messaging.aeron/embedded-media-driver-threading opts))
 
@@ -282,11 +295,25 @@
               (instance? onyx.types.Barrier res)
               (do (swap! result-state conj (assoc res :msg-id this-msg-index))
                   (swap! message-counter assoc src-peer-id (inc this-msg-index))
+
+                  (let [k [task-id (.position header) (.sessionId header)]
+                        m-id (get @position-assert-state k)] 
+                    (info "Adding 1 under " k)
+                    (assert (or (nil? m-id) (= m-id this-msg-index)) (str "differing message-id found between subscribers " m-id " " this-msg-index))
+                    (when-not m-id (swap! position-assert-state assoc k this-msg-index)))
+
                   ControlledFragmentHandler$Action/BREAK)
 
               (instance? onyx.types.Leaf res)
               (do (swap! result-state conj res)
                   (swap! message-counter assoc src-peer-id (inc this-msg-index))
+
+                  (let [k [task-id (.position header) (.sessionId header)]
+                        m-id (get @position-assert-state k)] 
+                    (info "Adding 2 under " k)
+                    (assert (or (nil? m-id) (= m-id this-msg-index)) (str "differing message-id found between subscribers " m-id " " this-msg-index))
+                    (when-not m-id (swap! position-assert-state assoc k this-msg-index)))
+
                   ControlledFragmentHandler$Action/CONTINUE)
 
               :else (throw (ex-info "Failed to handle incoming Aeron message"
