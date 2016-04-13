@@ -41,4 +41,10 @@
   (let [replica-job-ids (mapcat (fn [k] 
                                   (keys (replica k))) 
                                 [:allocations :task-metadata :exhausted-inputs :exhausted-outputs])]
+    (when-not (empty? (remove (set jobs) replica-job-ids))
+      (info "REPLICA:" replica)))
+
+  (let [replica-job-ids (mapcat (fn [k] 
+                                  (keys (replica k))) 
+                                [:allocations :task-metadata :exhausted-inputs :exhausted-outputs])]
     (empty? (remove (set jobs) replica-job-ids))))
