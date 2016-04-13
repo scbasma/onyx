@@ -51,6 +51,7 @@
               (component/stop @(:lifecycle state)))
             :else
             (let [new-replica (extensions/apply-log-entry entry replica)
+                  _ (timbre/info "Log entry" entry)
                   diff (extensions/replica-diff entry replica new-replica)
                   reactions (extensions/reactions entry replica new-replica diff state)
                   new-peer-view (extensions/peer-replica-view log entry replica new-replica peer-view diff state opts)
