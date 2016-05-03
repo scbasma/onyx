@@ -2,7 +2,7 @@
   (:require [clojure.core.async :refer [chan >!! <!! close! sliding-buffer]]
             [clojure.test :refer [deftest is testing]]
             [onyx.plugin.core-async :refer [take-segments!]]
-            [onyx.test-helper :refer [load-config with-test-env]]
+            [onyx.test-helper :refer [load-config with-test-env feedback-exception!]]
             [onyx.api]))
 
 (def output (atom {}))
@@ -63,7 +63,7 @@
 
                  {:onyx/name :sum-balance
                   :onyx/plugin :onyx.peer.kw-grouping-test/sum-balance
-                  :onyx/fn :onyx.peer.kw-grouping-test/sum-balance
+                  :onyx/fn :onyx.peer.kw-grouping-test/sum-balanc
                   :onyx/type :function
                   :onyx/group-by-key [:name :first-name [:first-name :first_name]]
                   :onyx/min-peers 2
@@ -151,12 +151,12 @@
       (>!! @in-chan :done)
       (close! @in-chan)
 
-      (onyx.api/submit-job peer-config
-                           {:catalog catalog :workflow workflow
-                            :lifecycles lifecycles
-                            :task-scheduler :onyx.task-scheduler/balanced})
-
-      (let [results (take-segments! @out-chan)]
+      (let [job-id (:job-id (onyx.api/submit-job peer-config
+                                                 {:catalog catalog :workflow workflow
+                                                  :lifecycles lifecycles
+                                                  :task-scheduler :onyx.task-scheduler/balanced}))
+            _ (feedback-exception! peer-config job-id)
+            results (take-segments! @out-chan)]
         (is (= [:done] results))))
 
     ;; check outside the peer shutdown so that we can ensure task is fully stopped
