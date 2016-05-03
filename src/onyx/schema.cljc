@@ -256,7 +256,7 @@
 (s/defschema FlowCondition
   {:flow/from (s/cond-pre TaskName SpecialFlowTasks)
    :flow/to (s/cond-pre TaskName [TaskName] SpecialFlowTasks)
-   :flow/predicate (s/cond-pre s/Keyword [s/Any])
+   :flow/predcate (s/cond-pre s/Keyword [s/Any])
    (s/optional-key :flow/post-transform) NamespacedKeyword
    (s/optional-key :flow/thrown-exception?) s/Bool
    (s/optional-key :flow/action) FlowAction
