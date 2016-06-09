@@ -72,11 +72,16 @@
    :opts {:onyx.peer/try-join-once?
           (:onyx.peer/try-join-once? (:opts messenger) true)}})
 
+(defn same-slot-id? [old new job-id task-id peer-id]
+  (= (get-in old [:task-slot-ids job-id task-id peer-id])
+     (get-in new [:task-slot-ids job-id task-id peer-id])))
+
 (defn scheduler-invariants [old-replica new-replica entry]
   (let [prev-allocation (set (common/allocations->peers (:allocations old-replica)))
         new-allocation (set (common/allocations->peers (:allocations new-replica)))
         deallocated (clojure.set/difference prev-allocation new-allocation)
         new-allocated (clojure.set/difference new-allocation prev-allocation)
+        same-allocated (clojure.set/intersection new-allocation prev-allocation)
         prev-allocated-peers (set (map first prev-allocation))
         new-allocated-peers (set (map first new-allocation))
         prev-unallocated (clojure.set/difference (set (:peers old-replica)) prev-allocated-peers)
@@ -84,6 +89,11 @@
         newly-joined-peers (clojure.set/difference (set (:peers new-replica))  (set (:peers old-replica)))
         n-reallocations (+ (count new-allocated)
                            (count deallocated))]
+    (assert (empty?
+             (remove (fn [[peer {:keys [job task]}]]
+                       (same-slot-id? old-replica new-replica job task peer))
+                     same-allocated))
+            "No slot-id churn allowed on peers allocated to the same task.")
     (assert (or 
              ;; If different jobs are allocated between replicas
              ;; Then the lower bound is incorrect
