@@ -2,7 +2,7 @@
   (:require [clojure.core.async :refer [chan >!! <!! close!]]
             [onyx.messaging.dummy-messenger :refer [dummy-messenger]]
             [onyx.log.entry :refer [create-log-entry]]
-            [onyx.log.commands.common :refer [peer->allocated-job]]
+            [onyx.log.commands.common :as common :refer [peer->allocated-job]]
             [onyx.extensions :as extensions]
             [onyx.api :as api]
             [taoensso.timbre :as timbre :refer [info]]
@@ -72,8 +72,51 @@
    :opts {:onyx.peer/try-join-once?
           (:onyx.peer/try-join-once? (:opts messenger) true)}})
 
+(defn scheduler-invariants [old-replica new-replica entry]
+  (let [prev-allocation (set (common/allocations->peers (:allocations old-replica)))
+        new-allocation (set (common/allocations->peers (:allocations new-replica)))
+        deallocated (clojure.set/difference prev-allocation new-allocation)
+        new-allocated (clojure.set/difference new-allocation prev-allocation)
+        prev-allocated-peers (set (map first prev-allocation))
+        new-allocated-peers (set (map first new-allocation))
+        prev-unallocated (clojure.set/difference (set (:peers old-replica)) prev-allocated-peers)
+        allocated-peers-left (clojure.set/difference prev-allocated-peers (set (:peers new-replica)))
+        newly-joined-peers (clojure.set/difference (set (:peers new-replica))  (set (:peers old-replica)))
+        n-reallocations (+ (count new-allocated)
+                           (count deallocated))]
+    (assert (or 
+             ;; If different jobs are allocated between replicas
+             ;; Then the lower bound is incorrect
+             (not= (set (keys (:allocations old-replica)))
+                   (set (keys (:allocations new-replica))))
+
+             (<= n-reallocations
+              ;; Count up the number of allocations differences
+              
+
+              (max (+ ;; It should be less than either the number of peers that left
+                      (count allocated-peers-left)
+
+                      ;; plus the number of peers that left again, because other peers 
+                      ;; may need to be reallocated to their tasks
+
+                      (max 0 
+                           (- (count allocated-peers-left)
+                              ;; minus any spare peers that we have available 
+                              ;; since we are going to count them later
+                              (count newly-joined-peers)
+                              (count prev-unallocated)))
+
+                      (count newly-joined-peers)
+                      (count prev-unallocated)))))
+            (pr-str "Potentially bad reallocations: (" n-reallocations ")"
+                    (:allocations old-replica)
+                    (:allocations new-replica)
+                    entry))))
+
 (defn apply-entry [old-replica entries entry]
   (let [new-replica (extensions/apply-log-entry entry old-replica)
+        _ (scheduler-invariants old-replica new-replica entry)
         diff (extensions/replica-diff entry old-replica new-replica)
         actor-states (into (mapv #(new-state :group %) (active-groups new-replica entry)) 
                            (map #(new-state :peer %) (active-peers new-replica entry)))
