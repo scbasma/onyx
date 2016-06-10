@@ -3,13 +3,15 @@
             [clojure.set :refer [union difference subset?]]
             [clojure.data :refer [diff]]
             [com.stuartsierra.component :as component]
+            [cheshire.core :refer [parse-string]]
             [onyx.log.commands.common :as common]
             [onyx.extensions :as extensions]
             [onyx.log.replica-invariants :as invariants]
             [onyx.scheduling.common-task-scheduler :as cts]
             [onyx.scheduling.acker-scheduler :refer [choose-ackers]])
-  (:import [org.btrplace.model Model DefaultModel Mapping Node]
-           [org.btrplace.model.constraint Running RunningCapacity Quarantine Fence Among]
+  (:import [org.btrplace.model Model DefaultModel Mapping Node Instance]
+           [org.btrplace.model.constraint Running RunningCapacity Quarantine Fence Among MinMTTR]
+           [org.btrplace.json.model InstanceConverter]
            [org.btrplace.scheduler.choco DefaultChocoScheduler DefaultParameters]))
 
 (defn n-qualified-peers [replica peers job]
@@ -417,7 +419,15 @@
               (anti-jitter-constraints replica jobs task-seq peer->vm task->node capacities)
               (mapcat #(cts/task-constraints replica jobs (get capacities %) peer->vm task->node no-op-node %) jobs)
               [(RunningCapacity. ^Node no-op-node (int (n-no-op-tasks replica capacities task-seq)))]])
-            plan (.solve scheduler model constraints)]
+            plan (.solve scheduler model constraints)
+            i (Instance. model constraints (MinMTTR.))]
+        (clojure.pprint/pprint (parse-string (.toJSONString (InstanceConverter.) i) true))
+        (println "---- Solved to ---")
+        (if plan
+          (let [result-i (Instance. (.getResult plan) (MinMTTR.))]
+            (clojure.pprint/pprint (parse-string (.toJSONString (InstanceConverter.) result-i) true)))
+          (println "No solution"))
+        (println "====")
         (when plan
           (let [result-model (.getResult plan)
                 peer->task (build-peer->task result-model peer->vm node->task)
