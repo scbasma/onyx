@@ -4,6 +4,7 @@
             [clojure.data :refer [diff]]
             [com.stuartsierra.component :as component]
             [cheshire.core :refer [parse-string]]
+            [taoensso.timbre :refer [debug]]
             [onyx.log.commands.common :as common]
             [onyx.extensions :as extensions]
             [onyx.log.replica-invariants :as invariants]
@@ -393,6 +394,31 @@
         [utasks]))
      (filter #(not (seq (get-in replica [:peer-tags %]))) peers))))
 
+(defn debug-scheduler! [model constraints plan peer->vm node->task allocations]
+  (let [i (Instance. model constraints (MinMTTR.))]
+    (debug "---- Allocations before scheduler execution ----")
+    (debug allocations)
+    (debug "---- Scheduler model after execution ----")
+    (debug (parse-string (.toJSONString (InstanceConverter.) i) true))
+    (debug "---- Scheduler solved model to ---")
+    (if plan
+      (let [result-m (.getResult plan)
+            result-i (Instance. result-m (MinMTTR.))]
+        (debug (parse-string (.toJSONString (InstanceConverter.) result-i) true))
+        (debug "---- Onyx Allocations ----")
+        (debug
+         (reduce-kv
+          (fn [result peer-id vm]
+            (let [location (.getVMLocation ^Mapping (.getMapping result-m) vm)
+                  [job-id task-id] (node->task location)]
+              (assoc result peer-id
+                     {:job-id job-id
+                      :task-id task-id})))
+          {}
+          peer->vm)))
+      (debug "---- Scheduler found no solution ----"))
+    (debug "---- End scheduler debug ----")))
+
 (defn btr-place-scheduling [replica jobs job-utilization capacities]
   (if (seq jobs)
     (let [model (DefaultModel.)
@@ -419,15 +445,8 @@
               (anti-jitter-constraints replica jobs task-seq peer->vm task->node capacities)
               (mapcat #(cts/task-constraints replica jobs (get capacities %) peer->vm task->node no-op-node %) jobs)
               [(RunningCapacity. ^Node no-op-node (int (n-no-op-tasks replica capacities task-seq)))]])
-            plan (.solve scheduler model constraints)
-            i (Instance. model constraints (MinMTTR.))]
-        (clojure.pprint/pprint (parse-string (.toJSONString (InstanceConverter.) i) true))
-        (println "---- Solved to ---")
-        (if plan
-          (let [result-i (Instance. (.getResult plan) (MinMTTR.))]
-            (clojure.pprint/pprint (parse-string (.toJSONString (InstanceConverter.) result-i) true)))
-          (println "No solution"))
-        (println "====")
+            plan (.solve scheduler model constraints)]
+        (debug-scheduler! model constraints plan peer->vm node->task (:allocations replica))
         (when plan
           (let [result-model (.getResult plan)
                 peer->task (build-peer->task result-model peer->vm node->task)
