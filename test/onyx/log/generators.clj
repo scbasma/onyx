@@ -111,17 +111,29 @@
                       ;; may need to be reallocated to their tasks
 
                       (max 0 
-                           (- (count allocated-peers-left)
-                              ;; minus any spare peers that we have available 
-                              ;; since we are going to count them later
-                              (count newly-joined-peers)
-                              (count prev-unallocated)))
+                           (+ (- (count allocated-peers-left)
+                                 ;; minus any spare peers that we have available
+                                 ;; since we are going to count them later
+                                 (count newly-joined-peers)
+                                 (count prev-unallocated))
+
+                              ;; plus any peers that needed to be reallocated
+                              ;; to keep a task above its minimum required count
+                              (count
+                               (filter
+                                (fn [[peer-id {:keys [job task]}]]
+                                  ;; Only counts if this peer was previously allocated
+                                  (when (common/peer->allocated-job (:allocations old-replica) peer-id)
+                                    (= (get-in new-replica [:min-required-peers job task])
+                                       (count (get-in new-replica [:allocations job task])))))
+                                new-allocated))
+                              ))
 
                       (count newly-joined-peers)
                       (count prev-unallocated)))))
             (pr-str "Potentially bad reallocations: (" n-reallocations ")"
-                    (:allocations old-replica)
-                    (:allocations new-replica)
+                    old-replica
+                    new-replica
                     entry))))
 
 (defn apply-entry [old-replica entries entry]
