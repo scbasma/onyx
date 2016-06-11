@@ -126,9 +126,7 @@
                                   (when (common/peer->allocated-job (:allocations old-replica) peer-id)
                                     (= (get-in new-replica [:min-required-peers job task])
                                        (count (get-in new-replica [:allocations job task])))))
-                                new-allocated))
-                              ))
-
+                                new-allocated))))
                       (count newly-joined-peers)
                       (count prev-unallocated)))))
             (pr-str "Potentially bad reallocations: (" n-reallocations ")"
