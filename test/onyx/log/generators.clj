@@ -118,14 +118,11 @@
                                  (count prev-unallocated))
 
                               ;; plus any peers that needed to be reallocated
-                              ;; to keep a task above its minimum required count
+                              ;; to keep a task at its desired count
                               (count
                                (filter
                                 (fn [[peer-id {:keys [job task]}]]
-                                  ;; Only counts if this peer was previously allocated
-                                  (when (common/peer->allocated-job (:allocations old-replica) peer-id)
-                                    (= (get-in new-replica [:min-required-peers job task])
-                                       (count (get-in new-replica [:allocations job task])))))
+                                  (common/peer->allocated-job (:allocations old-replica) peer-id))
                                 new-allocated))))
                       (count newly-joined-peers)
                       (count prev-unallocated)))))
