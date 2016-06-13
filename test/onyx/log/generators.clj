@@ -84,9 +84,8 @@
      (reduce
       (fn [sum* task-id]
         (+ sum*
-           (Math/abs
-            (- (count (get-in old-allocations [job-id task-id] []))
-               (count (get-in left-allocations [job-id task-id] []))))
+           (- (count (get-in old-allocations [job-id task-id] []))
+              (count (get-in left-allocations [job-id task-id] [])))
            (Math/abs
             (- (count (get-in left-allocations [job-id task-id] []))
                (count (get-in new-allocations [job-id task-id] []))))))
@@ -116,7 +115,7 @@
                (= (:fn entry) :group-leave-cluster)
                (:allocations (glc/deallocated-replica (:args entry) old-replica))
                :else
-               (:allocations new-replica))
+               (:allocations old-replica))
          (:allocations new-replica))]
     (assert (empty?
              (remove (fn [[peer {:keys [job task]}]]
@@ -129,7 +128,7 @@
              (not= (set (keys (:allocations old-replica)))
                    (set (keys (:allocations new-replica))))
 
-             (<= n-reallocations n-expected-reallocs)
+             (<= n-expected-reallocs n-reallocations)
              (pr-str (format "Potentionally bad reallocations. Expected %s, actually performed %s"
                              n-expected-reallocations n-reallocations)
                      old-replica
