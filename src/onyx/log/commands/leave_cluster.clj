@@ -11,8 +11,7 @@
             [onyx.log.entry :refer [create-log-entry]]
             [onyx.scheduling.common-job-scheduler :refer [reconfigure-cluster-workload]]))
 
-(s/defmethod extensions/apply-log-entry :leave-cluster :- Replica
-  [{:keys [args]} :- LogEntry replica]
+(defn deallocated-replica [args replica]
   (let [{:keys [id group-id]} args]
     (assert id)
     (assert group-id)
@@ -29,8 +28,11 @@
         (update-in [:peer-tags] dissoc id)
         ((fn [rep] (if group-id (update-in rep [:groups-index group-id] disj id) rep)))
         (update-in [:groups-reverse-index] dissoc id)
-        (common/remove-peers id)
-        (reconfigure-cluster-workload))))
+        (common/remove-peers id))))
+
+(s/defmethod extensions/apply-log-entry :leave-cluster :- Replica
+  [{:keys [args]} :- LogEntry replica]
+  (reconfigure-cluster-workload (deallocated-replica args replica)))
 
 (s/defmethod extensions/replica-diff :leave-cluster :- ReplicaDiff
   [{:keys [args]} old new]

@@ -3,6 +3,8 @@
             [onyx.messaging.dummy-messenger :refer [dummy-messenger]]
             [onyx.log.entry :refer [create-log-entry]]
             [onyx.log.commands.common :as common :refer [peer->allocated-job]]
+            [onyx.log.commands.leave-cluster :as lc]
+            [onyx.log.commands.group-leave-cluster :as glc]
             [onyx.extensions :as extensions]
             [onyx.api :as api]
             [taoensso.timbre :as timbre :refer [info]]
@@ -76,6 +78,23 @@
   (= (get-in old [:task-slot-ids job-id task-id peer-id])
      (get-in new [:task-slot-ids job-id task-id peer-id])))
 
+(defn n-expected-reallocations [old-allocations left-allocations new-allocations]
+  (reduce
+   (fn [sum job-id]
+     (reduce
+      (fn [sum* task-id]
+        (+ sum*
+           (Math/abs
+            (- (count (get-in old-allocations [job-id task-id] []))
+               (count (get-in left-allocations [job-id task-id] []))))
+           (Math/abs
+            (- (count (get-in left-allocations [job-id task-id] []))
+               (count (get-in new-allocations [job-id task-id] []))))))
+      sum
+      (keys (get-in old-allocations [job-id] {}))))
+   0
+   (keys old-allocations)))
+
 (defn scheduler-invariants [old-replica new-replica entry]
   (let [prev-allocation (set (common/allocations->peers (:allocations old-replica)))
         new-allocation (set (common/allocations->peers (:allocations new-replica)))
@@ -88,7 +107,17 @@
         allocated-peers-left (clojure.set/difference prev-allocated-peers (set (:peers new-replica)))
         newly-joined-peers (clojure.set/difference (set (:peers new-replica))  (set (:peers old-replica)))
         n-reallocations (+ (count new-allocated)
-                           (count deallocated))]
+                           (count deallocated))
+        n-expected-reallocs
+        (n-expected-reallocations
+         (:allocations old-replica)
+         (cond (= (:fn entry) :leave-cluster)
+               (:allocations (lc/deallocated-replica (:args entry) old-replica))
+               (= (:fn entry) :group-leave-cluster)
+               (:allocations (glc/deallocated-replica (:args entry) old-replica))
+               :else
+               (:allocations new-replica))
+         (:allocations new-replica))]
     (assert (empty?
              (remove (fn [[peer {:keys [job task]}]]
                        (same-slot-id? old-replica new-replica job task peer))
@@ -100,36 +129,12 @@
              (not= (set (keys (:allocations old-replica)))
                    (set (keys (:allocations new-replica))))
 
-             (<= n-reallocations
-              ;; Count up the number of allocations differences
-              
-
-              (max (+ ;; It should be less than either the number of peers that left
-                      (count allocated-peers-left)
-
-                      ;; plus the number of peers that left again, because other peers 
-                      ;; may need to be reallocated to their tasks
-
-                      (max 0 
-                           (+ (- (count allocated-peers-left)
-                                 ;; minus any spare peers that we have available
-                                 ;; since we are going to count them later
-                                 (count newly-joined-peers)
-                                 (count prev-unallocated))
-
-                              ;; plus any peers that needed to be reallocated
-                              ;; to keep a task at its desired count
-                              (count
-                               (filter
-                                (fn [[peer-id {:keys [job task]}]]
-                                  (common/peer->allocated-job (:allocations old-replica) peer-id))
-                                new-allocated))))
-                      (count newly-joined-peers)
-                      (count prev-unallocated)))))
-            (pr-str "Potentially bad reallocations: (" n-reallocations ")"
-                    old-replica
-                    new-replica
-                    entry))))
+             (<= n-reallocations n-expected-reallocs)
+             (pr-str (format "Potentionally bad reallocations. Expected %s, actually performed %s"
+                             n-expected-reallocations n-reallocations)
+                     old-replica
+                     new-replica
+                     entry)))))
 
 (defn apply-entry [old-replica entries entry]
   (let [new-replica (extensions/apply-log-entry entry old-replica)
