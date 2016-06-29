@@ -117,6 +117,7 @@
                :else
                (:allocations old-replica))
          (:allocations new-replica))]
+    ;(assert (= n-expected-reallocs n-reallocations) (format "%s %s" n-expected-reallocs n-reallocations))
     (assert (empty?
              (remove (fn [[peer {:keys [job task]}]]
                        (same-slot-id? old-replica new-replica job task peer))
@@ -128,12 +129,12 @@
              (not= (set (keys (:allocations old-replica)))
                    (set (keys (:allocations new-replica))))
 
-             (<= n-expected-reallocs n-reallocations)
+             (<= n-reallocations n-expected-reallocs))
              (pr-str (format "Potentionally bad reallocations. Expected %s, actually performed %s"
-                             n-expected-reallocations n-reallocations)
+                             n-expected-reallocs n-reallocations)
                      old-replica
                      new-replica
-                     entry)))))
+                     entry))))
 
 (defn apply-entry [old-replica entries entry]
   (let [new-replica (extensions/apply-log-entry entry old-replica)
