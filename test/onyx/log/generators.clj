@@ -94,7 +94,81 @@
    0
    (keys old-allocations)))
 
-(defn scheduler-invariants [old-replica new-replica entry]
+(defn scheduler-invariants
+  "This assertion checks that the minimum number of peers
+   move between tasks when the scheduler makes a change.
+   It's based on an algorithm that uses the planned capacity
+   limits of each task to figure out how many peers joined
+   and left their respective tasks, and compares this to
+   the total number of position changes in the tasks. We
+   assert that the number of actual position changes is
+   lower than or equal to the number that we calculate
+   based on the capacity limits.
+
+   The maximum expected number of reallocations is determined
+   by creating a matrix of N rows, where N is the number
+   of tasks. The order of the rows doesn't matter. This matrix
+   has 3 columns. The first column represents the number of
+   peers assigned to this task in the old replica. The last
+   column represents the number of peers assigned to this task
+   in the new replica. The middle column represents the number
+   of peers assigned to this task *after* any peers that are
+   leaving as a result of the application of this log entry
+   have been removed from the replica. Thus, we have a Nx3 matrix.
+
+   For each row in the matrix, the second column is substracted
+   from the first column. This number yields the number of peer
+   removals for this task in an exact manner. Then, this number
+   is added to the absolute value of subtracting the third column
+   from the second column. This value yields the number of peer
+   additions, if any. We take the absolute value since the scheduler
+   can decide to deallocate this task and drop it to zero.
+
+   All the values for each row are summed, and this determines the
+   expected number of peer position changes. This is effective because
+   it doesn't conflate the tentative schedules at deallocate and
+   reallocation time.
+
+   We'll look at two examples.
+
+   1. Three tasks (1/2/1 allocations), 1 peer leaves
+
+   Initial matrix:
+   ---------------
+   [ 1  0  1 ]
+   [ 2  2  1 ]
+   [ 1  1  1 ]
+
+   Calculated deltas (ignoring 0's):
+   ---------------------------------
+   [ 1 <-- +1 --> 0 <-- +1 --> 1 ]
+   [ 2            2 <-- +1 --> 1 ]
+   [ 1            1            1 ]
+
+   So this allocation ends up as (1/1/1). Summing each
+   of the deltas (1 + 1 + 1), we end up with an expected
+   number of 3 for the reallocations value.
+
+   2. Three tasks (3/5/1 allocations), 2 peers (a group) leave
+      the first task, where the first task must maintain 3 peers
+      at a minimum.
+
+   Initial matrix:
+   ---------------
+   [ 3  1  3 ]
+   [ 5  5  3 ]
+   [ 1  1  1 ]
+
+   Calculated deltas (ignoring 0's):
+   ---------------------------------
+   [ 3 <-- +2 --> 1 <-- +2 --> 3 ]
+   [ 5            5 <-- +2 --> 3 ]
+   [ 1            1            1 ]
+
+   The allocations end up at (3/3/1), satisfying the minimum
+   number of peers for the first task. Adding the deltas together,
+   (2 + 2 + 2), we get an expected reallocation value of 6."
+  [old-replica new-replica entry]
   (let [prev-allocation (set (common/allocations->peers (:allocations old-replica)))
         new-allocation (set (common/allocations->peers (:allocations new-replica)))
         deallocated (clojure.set/difference prev-allocation new-allocation)
@@ -122,7 +196,13 @@
                        (same-slot-id? old-replica new-replica job task peer))
                      same-allocated))
             "No slot-id churn allowed on peers allocated to the same task.")
-    (assert (or 
+
+    ;; This assertion is temporarily disabled until this bug is fixed
+    ;; in BtrPlace: https://github.com/btrplace/scheduler/issues/120.
+    ;; This bug causes problems for scheduling changes where multiple
+    ;; peers leave their tasks due to a constraint, and ends up making
+    ;; the Scheduler move too many peers - thus failing this assertion.
+    #_(assert (or
              ;; If different jobs are allocated between replicas
              ;; Then the lower bound is incorrect
              (not= (set (keys (:allocations old-replica)))
