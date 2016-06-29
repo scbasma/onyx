@@ -273,3 +273,4 @@
           :allocations {:j1 {:t2 [:p1] :t3 [:p2] :t1 [:p5]}}
           :peer-state {:p1 :active :p2 :idle :p3 :idle :p4 :idle :p5 :idle}
           :task-schedulers {:j1 :onyx.task-scheduler/balanced}
+          :task-saturation {:j1 {:t1 1 :t2 1 :t3 1}}}))))))
