@@ -517,8 +517,10 @@
    :onyx.peer/job-scheduler JobScheduler
    :onyx.messaging/impl Messaging
    :onyx.messaging/bind-addr s/Str
+   (s/optional-key :onyx.log/config) {s/Any s/Any}
    (s/optional-key :onyx.messaging/peer-port) s/Int
    (s/optional-key :onyx.messaging/external-addr) s/Str
+   (s/optional-key :onyx.peer/stop-task-timeout-ms) s/Int
    (s/optional-key :onyx.peer/inbox-capacity) s/Int
    (s/optional-key :onyx.peer/outbox-capacity) s/Int
    (s/optional-key :onyx.peer/retry-start-interval) s/Int
@@ -632,8 +634,8 @@
    :sealed-outputs {JobId #{TaskId}}
    :ackers {JobId [PeerId]}
    :acker-percentage {JobId s/Int}
-   :acker-exclude-inputs {TaskId s/Bool}
-   :acker-exclude-outputs {TaskId s/Bool}
+   :acker-exclude-inputs {JobId s/Bool}
+   :acker-exclude-outputs {JobId s/Bool}
    :task-percentages {JobId {TaskId s/Num}}
    :percentages {JobId s/Num}
    :completed-jobs [JobId]
@@ -711,6 +713,7 @@
        :boolean s/Bool
        :keyword s/Keyword
        :any s/Any
+       :atom clojure.lang.Atom
        :segment s/Any
        :peer-config PeerConfig
        :catalog-entry TaskMap

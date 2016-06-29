@@ -7,7 +7,7 @@
               [onyx.static.rotating-seq :as rsc]
               [onyx.log.commands.common :as common]
               [onyx.log.entry :as entry]
-              [onyx.monitoring.measurements :refer [emit-latency emit-latency-value]]
+              [onyx.monitoring.measurements :refer [emit-latency emit-latency-value emit-count]]
               [onyx.static.planning :refer [find-task]]
               [onyx.static.uuid :as uuid]
               [onyx.messaging.acking-daemon :as acker]
@@ -83,9 +83,13 @@
   (seq (filter #(= :done (:message %))
                (:onyx.core/batch event))))
 
-(s/defn complete-job [{:keys [onyx.core/job-id onyx.core/task-id] :as event} :- Event]
-  (let [entry (entry/create-log-entry :exhaust-input {:job job-id :task task-id})]
-    (>!! (:onyx.core/outbox-ch event) entry)))
+(s/defn complete-job
+  [{:keys [onyx.core/job-id onyx.core/task-id onyx.core/emitted-exhausted?]
+    :as event} :- Event]
+  (when-not @emitted-exhausted?
+    (let [entry (entry/create-log-entry :exhaust-input {:job job-id :task task-id})]
+      (>!! (:onyx.core/outbox-ch event) entry)
+      (reset! emitted-exhausted? true))))
 
 (s/defn sentinel-id [event :- Event]
   (:id (first (filter #(= :done (:message %))
@@ -143,18 +147,21 @@
              (persistent! (:retries results))))
 
 (defn build-new-segments
-  [compiled {:keys [onyx.core/results] :as event}]
-  (let [results (reduce (fn [accumulated result]
-                          (let [root (:root result)
-                                segments (:segments accumulated)
-                                retries (:retries accumulated)
-                                ret (add-from-leaves segments retries event result compiled)
-                                new-ack (->Ack (:id root) (:completion-id root) (:ack-val ret) (atom 1) nil)
-                                acks (conj! (:acks accumulated) new-ack)]
-                            (->Results (:tree results) acks (:segments ret) (:retries ret))))
-                        results
-                        (:tree results))]
-    (assoc event :onyx.core/results (persistent-results! results))))
+  [compiled {:keys [onyx.core/results onyx.core/monitoring] :as event}]
+  (emit-latency 
+   :peer-batch-latency 
+   monitoring
+   #(let [results (reduce (fn [accumulated result]
+                            (let [root (:root result)
+                                  segments (:segments accumulated)
+                                  retries (:retries accumulated)
+                                  ret (add-from-leaves segments retries event result compiled)
+                                  new-ack (->Ack (:id root) (:completion-id root) (:ack-val ret) (atom 1) nil)
+                                  acks (conj! (:acks accumulated) new-ack)]
+                              (->Results (:tree results) acks (:segments ret) (:retries ret))))
+                          results
+                          (:tree results))]
+      (assoc event :onyx.core/results (persistent-results! results)))))
 
 (s/defn ack-segments :- Event
   [{:keys [peer-replica-view task-map state messenger monitoring] :as compiled} 
@@ -169,14 +176,22 @@
   event)
 
 (s/defn flow-retry-segments :- Event
-  [{:keys [peer-replica-view state messenger monitoring] :as compiled} 
-   {:keys [onyx.core/results] :as event} :- Event]
-  (doseq [root (:retries results)]
-    (when-let [site (peer-site peer-replica-view (:completion-id root))]
-      (emit-latency :peer-retry-segment
-                    monitoring
-                    #(extensions/internal-retry-segment messenger (:id root) site))))
-  event)
+  [{:keys [peer-replica-view state messenger monitoring] :as compiled}
+   event :- Event]
+  (let [{:keys [retries]} (:onyx.core/results event)
+        event (if (not (empty? retries))
+                (update-in event
+                           [:onyx.core/results :acks]
+                           (fn [acks]
+                             (filterv (comp not (set (map :id retries)) :id) acks)))
+                event)]
+    (doseq [root (:retries (:onyx.core/results event))]
+      (when-let [site (peer-site peer-replica-view (:completion-id root))]
+        (emit-latency
+         :peer-retry-segment
+         monitoring
+         #(extensions/internal-retry-segment messenger (:id root) site))))
+    event))
 
 (s/defn gen-lifecycle-id
   [event]
@@ -252,6 +267,7 @@
 (s/defn write-batch :- Event 
   [compiled event :- Event]
   (let [rets (merge event (p-ext/write-batch (:pipeline compiled) event))]
+    (emit-count :peer-processed-segments (:onyx.core/monitoring event) (count (:onyx.core/batch event)))
     (trace (:log-prefix compiled) (format "Wrote %s segments" (count (:onyx.core/results rets))))
     rets))
 
@@ -388,7 +404,7 @@
   component/Lifecycle
   (start [component]
     (let [catalog (extensions/read-chunk log :catalog job-id)
-          task (extensions/read-chunk log :task task-id)
+          task (extensions/read-chunk log :task job-id task-id)
           flow-conditions (extensions/read-chunk log :flow-conditions job-id)
           windows (extensions/read-chunk log :windows job-id)
           filtered-windows (vec (wc/filter-windows windows (:name task)))
@@ -397,7 +413,7 @@
           filtered-triggers (filterv #(window-ids (:trigger/window-id %)) triggers)
           workflow (extensions/read-chunk log :workflow job-id)
           lifecycles (extensions/read-chunk log :lifecycles job-id)
-          metadata (or (extensions/read-chunk log :job-metadata job-id) {})
+          metadata (extensions/read-chunk log :job-metadata job-id)
           task-map (find-task catalog (:name task))]
       (assoc component 
              :workflow workflow :catalog catalog :task task :task-name (:name task) :flow-conditions flow-conditions
@@ -474,7 +490,8 @@
                            :onyx.core/replica replica
                            :onyx.core/peer-replica-view peer-replica-view
                            :onyx.core/log-prefix log-prefix
-                           :onyx.core/state state}
+                           :onyx.core/state state
+                           :onyx.core/emitted-exhausted? (atom false)}
 
             _ (info log-prefix "Warming up task lifecycle" task)
 
