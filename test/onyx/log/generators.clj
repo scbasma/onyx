@@ -117,7 +117,6 @@
                :else
                (:allocations old-replica))
          (:allocations new-replica))]
-    ;(assert (= n-expected-reallocs n-reallocations) (format "%s %s" n-expected-reallocs n-reallocations))
     (assert (empty?
              (remove (fn [[peer {:keys [job task]}]]
                        (same-slot-id? old-replica new-replica job task peer))
@@ -128,6 +127,9 @@
              ;; Then the lower bound is incorrect
              (not= (set (keys (:allocations old-replica)))
                    (set (keys (:allocations new-replica))))
+
+             (not= (set (:jobs old-replica))
+                   (set (:jobs new-replica)))
 
              (<= n-reallocations n-expected-reallocs))
              (pr-str (format "Potentionally bad reallocations. Expected %s, actually performed %s"
