@@ -203,21 +203,24 @@
 (defspec deterministic-abs-test {;:seed X
                                  :num-tests (times 500)}
   (for-all [uuid-seed (gen/no-shrink gen/int)
-            n-jobs (gen/resize 4 gen/s-pos-int) ;(gen/return 1)
+            n-jobs #_(gen/resize 4 gen/s-pos-int) (gen/return 1)
             job-ids (gen/vector gen/uuid n-jobs)
+            initial-cmds (gen/vector (submit-job-gen n-jobs job-ids) 1)
             gen-cmds ;gen/no-shrink (gen/return failing)
             ;gen/no-shrink 
             
-            (gen/scale #(* 5 %) ; scale to larger command sets quicker
+            (gen/no-shrink (gen/scale #(* 5 %) ; scale to larger command sets quicker
                        (gen/vector 
-                        (gen/frequency [[300 g/task-iteration-gen]
-                                        [50 g/add-peer-group-gen]
-                                        [50 g/add-peer-gen]
-                                        [10 g/remove-peer-gen]
-                                        [50 g/play-group-commands-gen]
-                                        [50 g/write-outbox-entries-gen]
-                                        [50 g/apply-log-entries-gen]
-                                        [50 (submit-job-gen n-jobs job-ids)]])))]
+                        (gen/frequency [;[300 g/task-iteration-gen]
+                                        [600 g/task-iteration-stanza-gen]
+                                        ;[50 g/add-peer-group-gen]
+                                        ;[50 g/add-peer-gen]
+                                        ;[10 g/remove-peer-gen]
+                                        ;[50 g/play-group-commands-gen]
+                                        ;[50 g/write-outbox-entries-gen]
+                                        ;[50 g/apply-log-entries-gen]
+                                        [5 (submit-job-gen n-jobs job-ids)]]) 
+                        100)))]
            (let [job-commands (set (filter #(= (:command %) :submit-job) gen-cmds)) 
                  jobs (map :job-spec job-commands)
                  n-required-peers (if (empty? jobs) 0 (apply max (map :min-peers jobs)))
@@ -226,15 +229,21 @@
                  all-cmds (concat 
                            final-add-peer-cmds 
                            [{:type :drain-commands}]
+                           [{:type :drain-commands}]
+                           [{:type :drain-commands}]
+                           initial-cmds
+                           [{:type :drain-commands}]
+                           [{:type :drain-commands}]
+                           [{:type :drain-commands}]
                            gen-cmds 
                            ;; Ensure all the peer joining activities have finished
-                           [{:type :drain-commands}]
+                           ;[{:type :drain-commands}]
                            ;; Then re-add enough peers to completely the job
-                           final-add-peer-cmds 
+                           ;final-add-peer-cmds 
                            ;; Ensure they've fully joined
-                           [{:type :drain-commands}]
+                           ;[{:type :drain-commands}]
                            ;; Complete the job
-                           (job-completion-cmds unique-groups jobs)
+                           ;(job-completion-cmds unique-groups jobs)
                            [{:type :drain-commands}])
                  model (g/model-commands all-cmds)
                  _ (println "Start run" (count gen-cmds))

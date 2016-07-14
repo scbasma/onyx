@@ -115,6 +115,8 @@
             (gen/tuple peer-group-num-gen
                        peer-num-gen)))
 
+(def task-iteration-stanza-gen
+  (gen/vector task-iteration-gen 60))
 
 (defn write-outbox-entries [state entries]
   (reduce (fn [s entry]
@@ -224,15 +226,18 @@
   [:state :vpeers peer-id :virtual-peer :state :started-task-ch :prev-event])
 
 (defn task-iteration [groups {:keys [group-id peer-owner-id]}]
+  (println "task iteration " group-id)
   ;; Clean up peer command work
   ;; Also make it so different command types are scoped in vector
   ;; Maybe use maps instead of vectors
   ;; TODO ONLY TASK ITERATION HERE
   (let [group (get groups group-id)
         peer-id (get-peer-id group peer-owner-id)]
+    (println "peer-id " peer-id (:allocations (:replica (:state group))) )
     ;(println "Got peer id? "peer-id)
     (if peer-id
       (let [init-event (get-in group (init-event-path peer-id))] 
+        ;(println "init event " init-event)
         ;; If we can access the event, it means the peer has started its task lifecycle
         (if init-event
           (let [current-replica (:replica (:state group))
@@ -280,34 +285,37 @@
                 (new-group peer-config))))))
 
 (defn apply-command [peer-config groups event]
-  (case (:type event)
+  (if (vector? event)
+    (reduce (partial apply-command peer-config) groups event)
+    
+    (case (:type event)
 
-    :drain-commands
-    (drain-commands groups)
+      :drain-commands
+      (drain-commands groups)
 
-    :orchestration
-    (apply-orchestration-command groups peer-config event)
+      :orchestration
+      (apply-orchestration-command groups peer-config event)
 
-    :peer
-    (apply-peer-commands groups event)
+      :peer
+      (apply-peer-commands groups event)
 
-    :event
-    (case (:command event)
-      :submit-job (do ;; Quite stateful
-                      (onyx.api/submit-job peer-config (:job (:job-spec event)))
-                      groups))
+      :event
+      (case (:command event)
+        :submit-job (do ;; Quite stateful
+                        (onyx.api/submit-job peer-config (:job (:job-spec event)))
+                        groups))
 
-    ;:remove-peer-group
-    ; (do (if-let [group (get groups group-id)]
-    ;         (onyx.api/shutdown-peer-group group))
-    ;       (dissoc group)
-    ;       (update groups 
-    ;               group-id 
-    ;               (fn [group]
-    ;                 (if group))))
+      ;:remove-peer-group
+      ; (do (if-let [group (get groups group-id)]
+      ;         (onyx.api/shutdown-peer-group group))
+      ;       (dissoc group)
+      ;       (update groups 
+      ;               group-id 
+      ;               (fn [group]
+      ;                 (if group))))
 
-    :group
-    (apply-group-command groups event)))
+      :group
+      (apply-group-command groups event))))
 
 (defn model-commands [commands]
   (reduce (fn [model {:keys [command type] :as event}]
