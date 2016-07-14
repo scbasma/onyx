@@ -169,7 +169,9 @@
                        (apply-log-entries state (:iterations event))
 
                        :play-group-commands
-                       (play-group-commands state (:iterations event))
+                       (do
+                        (println "play group command " event)
+                        (play-group-commands state (:iterations event)))
 
                        :write-group-command
                        (do 
@@ -185,15 +187,15 @@
                     [{:type :group
                       :command :play-group-commands
                       :group-id g
-                      :iterations 1}
+                      :iterations 10}
                      {:type :group 
                       :command :write-outbox-entries
                       :group-id g
-                      :iterations 1}
+                      :iterations 10}
                      {:type :group
                       :command :apply-log-entries
                       :group-id g
-                      :iterations 1}])
+                      :iterations 10}])
                   (keys groups))
         new-groups (reduce apply-group-command groups commands)]
     ;(println (last (clojure.data/diff groups new-groups)))
@@ -226,14 +228,13 @@
   [:state :vpeers peer-id :virtual-peer :state :started-task-ch :prev-event])
 
 (defn task-iteration [groups {:keys [group-id peer-owner-id]}]
-  (println "task iteration " group-id)
   ;; Clean up peer command work
   ;; Also make it so different command types are scoped in vector
   ;; Maybe use maps instead of vectors
   ;; TODO ONLY TASK ITERATION HERE
   (let [group (get groups group-id)
         peer-id (get-peer-id group peer-owner-id)]
-    (println "peer-id " peer-id (:allocations (:replica (:state group))) )
+    ;(println "peer-id " peer-id (:allocations (:replica (:state group))) )
     ;(println "Got peer id? "peer-id)
     (if peer-id
       (let [init-event (get-in group (init-event-path peer-id))] 
@@ -392,6 +393,8 @@
                               :onyx/tenancy-id onyx-id
                               :onyx.log/config {:level :error})
             peer-config (assoc (:peer-config config) 
+                               :onyx.peer/outbox-capacity 1000000
+                               :onyx.peer/inbox-capacity 1000000
                                :onyx/tenancy-id onyx-id
                                :onyx.log/config {:level :error})
             groups {}]

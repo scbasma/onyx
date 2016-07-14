@@ -59,8 +59,8 @@
                     (let [n-messages 20
                           task-opts {:onyx/batch-size 2}
                           inputs (map (fn [n] {:n n :path []}) (range n-messages))
-                          job (-> (build-job [[:in1 :inc] [:in2 :inc] [:inc :out]] 
-                                             [{:name :in1
+                          job (-> (build-job [#_[:in1 :inc] [:in2 :inc] [:inc :out]] 
+                                             [#_{:name :in1
                                                :type :seq 
                                                ;;:task-opts (assoc task-opts :onyx/fn ::add-path :onyx/max-peers 2)
                                                ;; n-peers must be set for input task or else slots won't be stable
@@ -201,7 +201,7 @@
 
 ;; State checkpointing can happen in emit-barriers
 (defspec deterministic-abs-test {;:seed X
-                                 :num-tests (times 500)}
+                                 :num-tests (times 1)}
   (for-all [uuid-seed (gen/no-shrink gen/int)
             n-jobs #_(gen/resize 4 gen/s-pos-int) (gen/return 1)
             job-ids (gen/vector gen/uuid n-jobs)
@@ -210,18 +210,18 @@
             ;gen/no-shrink 
             
             (gen/no-shrink (gen/scale #(* 5 %) ; scale to larger command sets quicker
-                       (gen/vector 
-                        (gen/frequency [;[300 g/task-iteration-gen]
-                                        [600 g/task-iteration-stanza-gen]
-                                        ;[50 g/add-peer-group-gen]
-                                        ;[50 g/add-peer-gen]
-                                        ;[10 g/remove-peer-gen]
-                                        ;[50 g/play-group-commands-gen]
-                                        ;[50 g/write-outbox-entries-gen]
-                                        ;[50 g/apply-log-entries-gen]
-                                        [5 (submit-job-gen n-jobs job-ids)]]) 
-                        100)))]
-           (let [job-commands (set (filter #(= (:command %) :submit-job) gen-cmds)) 
+                                      (gen/vector 
+                                       (gen/frequency [;[300 g/task-iteration-gen]
+                                                       [600 g/task-iteration-stanza-gen]
+                                                       ;[50 g/add-peer-group-gen]
+                                                       ;[50 g/add-peer-gen]
+                                                       [50 g/remove-peer-gen]
+                                                       [50 g/play-group-commands-gen]
+                                                       [50 g/write-outbox-entries-gen]
+                                                       [50 g/apply-log-entries-gen]
+                                                       [5 (submit-job-gen n-jobs job-ids)]]) 
+                                       10000)))]
+           (let [job-commands (set (filter #(= (:command %) :submit-job) (concat initial-cmds gen-cmds))) 
                  jobs (map :job-spec job-commands)
                  n-required-peers (if (empty? jobs) 0 (apply max (map :min-peers jobs)))
                  final-add-peer-cmds (add-enough-peer-cmds n-required-peers)
@@ -229,11 +229,7 @@
                  all-cmds (concat 
                            final-add-peer-cmds 
                            [{:type :drain-commands}]
-                           [{:type :drain-commands}]
-                           [{:type :drain-commands}]
                            initial-cmds
-                           [{:type :drain-commands}]
-                           [{:type :drain-commands}]
                            [{:type :drain-commands}]
                            gen-cmds 
                            ;; Ensure all the peer joining activities have finished
@@ -255,6 +251,7 @@
                  peer-outputs (map (comp :written val) 
                                    (mapcat val peers-state))
                  actual-outputs (remove keyword? (reduce into [] (reduce into [] peer-outputs)))]
+             (println replica)
              ;(println  "jobs " jobs "comp" (:completed-jobs replica))
              ;(println "gen-cmds" gen-cmds)
              (is (>= n-peers n-required-peers) "not enough peers")
