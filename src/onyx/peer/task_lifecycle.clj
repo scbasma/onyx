@@ -140,21 +140,49 @@
   (m/poll messenger)
   state)
 
+(def tried-to-write (atom []))
+
+(deref tried-to-write)
+
 (defn offer-barriers 
   [{:keys [messenger context] :as state}]
+  (println "Going to offer from" (:id (:event state)) "to publications" (:publications context))
    (loop [pubs (:publications context)]
      (if-not (empty? pubs)
        (let [pub (first pubs)
              ret (m/emit-barrier messenger pub (:barrier-opts context))]
+         #_(assert 
+          (not (= {:dst-task-id [#uuid "144910a6-3ccc-404d-89aa-543031d45e79" :inc], 
+                   :src-peer-id #uuid "2c16fb10-04a3-dc50-d673-7fb9e8ff8c01"
+                   ;#uuid "3c15d80c-63a6-c9a6-caf2-a77e5e1a221e"
+                   }
+                  (select-keys pub [:src-peer-id :dst-task-id])))
+                 
+                 )
+
+
+         (when ;and (= 120 (m/replica-version messenger))
+                    (= {:dst-task-id [#uuid "144910a6-3ccc-404d-89aa-543031d45e79" :inc], 
+                        :src-peer-id #uuid "2c16fb10-04a3-dc50-d673-7fb9e8ff8c01"
+                        ;#uuid "3c15d80c-63a6-c9a6-caf2-a77e5e1a221e"
+                        }
+                       (select-keys pub [:src-peer-id :dst-task-id]))
+           (swap! tried-to-write conj [pub ret])
+
+           )
+
+         ;(println "Emitting from " (:id (:event state)) ret)
          (case ret
            :success (recur (rest pubs))
            :fail (-> state
                      (assoc-in [:context :publications] pubs)
                      (assoc :state :blocked))))
-       (-> state 
+       (do
+        (println "Unblocking for " (m/replica-version messenger) (m/epoch messenger))
+        (-> state 
            (update :messenger m/unblock-subscriptions!)
            (assoc :context nil)
-           (assoc :state :runnable)))))
+           (assoc :state :runnable))))))
 
 (defn record-pipeline-barrier [{:keys [event messenger pipeline] :as state}]
   (if (= :input (:task-type event))
@@ -231,7 +259,8 @@
                                        :job-id job-id 
                                        :task-id task-id
                                        :slot-id slot-id})]
-    (info "job completed:" job-id task-id (:replica-version (:args entry)))
+    (println "Job completed" job-id task-id (:args entry))
+    (info "job completed:" job-id task-id (:args entry))
     (>!! outbox-ch entry)))
 
 (defn backoff-when-drained! [event]
@@ -241,16 +270,26 @@
   [state]
   (ws/assign-windows state :new-segment))
 
+(defn epoch-gaps? [barriers]
+  (and (not (empty? barriers))
+       (let [epochs (keys barriers)
+             mn (apply min epochs)
+             mx (apply max epochs)]
+         (not= (set epochs) (set (range mn (inc mx)))))))
+
 (defn poll-acks [{:keys [event messenger barriers] :as state}]
   (let [new-messenger (m/poll-acks messenger)
         ack-result (m/all-acks-seen? new-messenger)]
     (if ack-result
       (let [{:keys [replica-version epoch]} ack-result
             barrier (get barriers epoch)]
+        (assert (not (epoch-gaps? barriers)))
+        (println "Got ack result" (into {} ack-result))
         (if (and barrier (= replica-version (m/replica-version new-messenger)))
           (let [{:keys [job-id task-id slot-id log]} event
                 completed? (:completed? barrier)] 
             (extensions/write-checkpoint log job-id replica-version epoch task-id slot-id :input (:checkpoint barrier))
+            (println "Removing barrier for epoch" epoch barrier)
             (when completed?
               (if (not (:exhausted? state))
                 (complete-job! state)
@@ -313,8 +352,8 @@
     pipeline))
 
 (defn recover-state [{:keys [messenger coordinator replica context event] :as state}]
-  (let [{:keys [job-id task-type windows task-id slot-id]} event 
-        _ (println "RECOVERING STATE " task-id context)
+  (let [{:keys [job-id task-type windows task-id slot-id id]} event 
+        _ (println "RECOVERING STATE " task-id context id)
         new-state (if (= task-type :output)
                     (assoc state :state :runnable)
                     (offer-barriers state))]
@@ -341,9 +380,26 @@
           next-state)))))
 
 (defn poll-recover [{:keys [messenger event] :as state}]
+  #_(assert (or
+           (not= 120 (m/replica-version messenger))
+          
+           (not (some (fn [v]
+                  (= {:dst-task-id [#uuid "144910a6-3ccc-404d-89aa-543031d45e79" :inc], 
+                      :src-peer-id #uuid "2c16fb10-04a3-dc50-d673-7fb9e8ff8c01"
+                      ;#uuid "3c15d80c-63a6-c9a6-caf2-a77e5e1a221e"
+                      }
+                     (select-keys v [:src-peer-id :dst-task-id]))
+                  )
+                     (m/publications messenger)
+                     )))
+          
+          [(m/replica-version messenger)
+           (m/publications messenger)
+           ]
+          )
   (if-let [recover (m/poll-recover messenger)]
     (assoc state 
-           :lifecycle :recovering
+           :state :runnable
            :messenger (if (= :output (:task-type event))
                         messenger
                         (m/next-epoch messenger))
@@ -373,21 +429,41 @@
 
 (defn print-state [{:keys [event] :as state}]
   (let [task-map (:task-map event)] 
-    (info "Task state" 
-          (:onyx/type task-map) 
-          (:onyx/name task-map)
-          (:lifecycle state)
-          (:state state)
-          "barriers (20 max)"
-          (vec (take 20 (sort-by key (:barriers state))))
-          "rep"
-          (m/replica-version (:messenger state))
-          "epoch"
-          (m/epoch (:messenger state))
-          "batch"
-          (:batch event)
-          "segments out"
-          (:segments (:results event))))
+    #_(println "Task state" 
+             (:onyx/type task-map) 
+             (:onyx/name task-map)
+             (:lifecycle state)
+             (:id event)
+             (m/replica-version (:messenger state))
+             (m/epoch (:messenger state))
+             ; "all barriers seen" (m/all-barriers-seen? (:messenger state))
+             ; "barriers (5 shown)"
+             ; (vec (take 5 (sort-by key (:barriers state))))
+
+             )
+
+    (when (#{:input :function :output} (:onyx/type task-map)) 
+      (println "Task state" 
+             (:onyx/type task-map) 
+             (:onyx/name task-map)
+             (:id event)
+             (:lifecycle state)
+             (:state state)
+             "rep"
+             (m/replica-version (:messenger state))
+             "epoch"
+             (m/epoch (:messenger state))
+             "port"
+             (:port (:messenger-group (:messenger state)))
+             "batch"
+             (:batch event)
+             "segments out"
+             (:segments (:results event))
+             ; "all barriers seen" (m/all-barriers-seen? (:messenger state))
+             ; "barriers (5 shown)"
+             ; (vec (take 5 (sort-by key (:barriers state))))
+             
+             )))
   state)
 
 (defn next-lifecycle [state]
@@ -458,6 +534,8 @@
       :ack-barriers (ack-barriers state)))
 
 (defn next-state [prev-state replica]
+  ;; Try to make the aeron code more deterministic
+  (Thread/sleep 1)
   (let [job-id (get-in prev-state [:event :job-id])
         _ (assert job-id)
         old-replica (:replica prev-state)
@@ -467,11 +545,11 @@
       (if-not (= old-version new-version)
         (next-state-from-replica prev-state replica)
         (loop [state prev-state]
+          (print-state state)
           ;(println "Trying " (:task (:event state)) (:lifecycle state)  (:state state))
           (let [new-state (-> state
                               transition
                               next-lifecycle)]
-            (print-state new-state)
             (if (or (= :blocked (:state new-state))
                     (= :start-processing (:lifecycle new-state)))
               (do
@@ -483,7 +561,6 @@
 (defn run-task-lifecycle
   "The main task run loop, read batch, ack messages, etc."
   [init-state ex-f]
-  (println "Run task lifecycle" (:lifecycle init-state))
   (try
     (assert (:event init-state))
     (let [{:keys [task-kill-ch kill-ch task-information replica-atom opts state]} (:event init-state)] 
@@ -564,8 +641,8 @@
   (<!! (:task-lifecycle-ch component)))
 
 (defrecord TaskLifeCycle
-  [id log messenger job-id task-id replica group-ch log-prefix
-   kill-ch outbox-ch seal-ch completion-ch peer-group opts task-kill-ch scheduler-event task-monitoring task-information]
+  [id log messenger job-id task-id replica group-ch log-prefix kill-ch outbox-ch seal-ch 
+   completion-ch peer-group opts task-kill-ch scheduler-event task-monitoring task-information]
   component/Lifecycle
 
   (start [component]
@@ -645,6 +722,8 @@
                 :state initial-state
                 :log-prefix log-prefix
                 :task-information task-information
+                ;; atom for storing peer test state
+                :holder (atom nil)
                 :task-kill-ch task-kill-ch
                 :kill-ch kill-ch
                 :task-lifecycle-ch task-lifecycle-ch)))
@@ -679,6 +758,7 @@
     (assoc component
            :event nil
            :state nil
+           :holder nil
            :log-prefix nil
            :task-information nil
            :task-kill-ch nil

@@ -64,8 +64,18 @@
         remove-pubs (clojure.set/difference old-pubs new-pubs)
         add-pubs (clojure.set/difference new-pubs old-pubs)]
     (as-> messenger m
-      (reduce m/remove-publication m remove-pubs)
-      (reduce m/add-publication m add-pubs))))
+      (reduce m/add-publication m add-pubs)
+      (reduce m/remove-publication m remove-pubs))))
+
+(def send-failures (atom []))
+
+(filter #(and 
+          (= (:site (nth % 2))
+             {:address "localhost", :port 40004})
+                 
+          (= [#uuid "e2a73cc3-ac7a-4904-b325-78a90322389c" :in2]
+             (:dst-task-id (nth % 2)))
+                 (= (last %) 1) #_(= (first %) :fail)) (deref send-failures))
 
 (defn offer-barriers 
   [{:keys [messenger rem-barriers barrier-opts offering?] :as state}]
@@ -75,6 +85,7 @@
       (if-not (empty? pubs)
         (let [pub (first pubs)
               ret (m/emit-barrier messenger pub barrier-opts)]
+          (swap! send-failures conj [ret (m/replica-version messenger) pub (m/epoch messenger)])
           (case ret
             :success (recur (rest pubs))
             :fail (assoc state :rem-barriers pubs)))
@@ -99,21 +110,24 @@
            :prev-replica new-replica
            :messenger new-messenger)))
 
-(defn periodic-barrier [{:keys [prev-replica job-id messenger] :as state}]
-  (let [messenger (m/next-epoch messenger)] 
-    (assoc state 
-           :offering? true
-           :barrier-opts {}
-           :messenger messenger
-           :rem-barriers (m/publications messenger))))
+(defn periodic-barrier [{:keys [prev-replica job-id messenger offering?] :as state}]
+  (if offering?
+    ;; No op because hasn't finished emitting last barrier, wait again
+    state
+    (let [messenger (m/next-epoch messenger)] 
+      (assoc state 
+             :offering? true
+             :barrier-opts {}
+             :rem-barriers (m/publications messenger)
+             :messenger messenger))))
 
-(defn coordinator-action [action-type {:keys [messenger] :as state} new-replica]
+(defn coordinator-action [action-type {:keys [messenger peer-id job-id] :as state} new-replica]
   (assert 
    (if (#{:reallocation} action-type)
-     (some #{(:job-id state)} (:jobs new-replica))
+     (some #{job-id} (:jobs new-replica))
      true))
+  (assert (= peer-id (get-in new-replica [:coordinators job-id])) [peer-id (get-in new-replica [:coordinators job-id])])
   (assert messenger)
-  (println action-type)
   (case action-type 
     :offer-barriers (offer-barriers state)
     :shutdown (assoc state :messenger (component/stop messenger))
@@ -166,6 +180,12 @@
       ;; Probably bad to have to default to -1, though it will get updated immediately
       (m/set-replica-version (get-in replica [:allocation-version job-id] -1))))
 
+(defn stop-coordinator! [{:keys [shutdown-ch allocation-ch]}]
+  (when shutdown-ch
+    (close! shutdown-ch))
+  (when allocation-ch 
+    (close! allocation-ch)))
+
 (defrecord PeerCoordinator [log messenger-group peer-config peer-id job-id messenger
                             group-ch allocation-ch shutdown-ch coordinator-thread]
   Coordinator
@@ -196,11 +216,8 @@
     (true? (:started? this)))
   (stop [this]
     (info "Stopping coordinator on:" peer-id)
+    (stop-coordinator! this)
     ;; TODO blocking retrieve value from coordinator thread so that we can wait for full shutdown
-    (when shutdown-ch
-      (close! shutdown-ch))
-    (when allocation-ch 
-      (close! allocation-ch))
     (info "Coordinator stopped.")
     (assoc this :allocation-ch nil :started? false :shutdown-ch nil :coordinator-thread nil))
   (next-state [this old-replica new-replica]

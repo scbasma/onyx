@@ -31,6 +31,7 @@
 
 (defn read-input-batch [{:keys [event pipeline] :as state}]
   (let [{:keys [task-map id job-id task-id]} event
+        _ (println "Read input batch" id (m/all-barriers-seen? (:messenger state)))
         batch-size (:onyx/batch-size task-map)
         [next-reader batch] 
         (loop [reader pipeline

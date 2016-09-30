@@ -42,12 +42,29 @@
                                             (let [slot-id (if (state-task? replica job-id task-id)
                                                             (get-in task-slot-ids [job-id task-id peer-id])
                                                             all-slots)] 
+                                              #_(assert (not (= {:dst-task-id [#uuid "144910a6-3ccc-404d-89aa-543031d45e79" :inc], 
+                                                               :src-peer-id #uuid "2c16fb10-04a3-dc50-d673-7fb9e8ff8c01"
+                                                               ;#uuid "3c15d80c-63a6-c9a6-caf2-a77e5e1a221e"
+                                                               }
+                                                              (select-keys 
+                                                               {:src-peer-id id
+                                                                ;; Refactor dst-task-id to include job-id too
+                                                                :dst-task-id [job-id task-id]
+                                                                :slot-id slot-id
+                                                                :site (peer-sites peer-id)}                
+                                                               [:src-peer-id :dst-task-id])))
+                                               {:src-peer-id id
+                                               ;; Refactor dst-task-id to include job-id too
+                                               :dst-task-id [job-id task-id]
+                                               :slot-id slot-id
+                                               :site (peer-sites peer-id)}       
+                                                      )
+
                                               (assert slot-id)
                                               {:src-peer-id id
                                                ;; Refactor dst-task-id to include job-id too
                                                :dst-task-id [job-id task-id]
                                                :slot-id slot-id
-                                               ;; Double check that peer site is correct
                                                :site (peer-sites peer-id)}))
                                           peers))))
                          set)
@@ -59,7 +76,6 @@
                                            {:src-peer-id id
                                             :dst-task-id [job-id task-id]
                                             :slot-id (get-in task-slot-ids [job-id task-id peer-id])
-                                            ;; Double check that peer site is correct
                                             :site (peer-sites peer-id)})
                                          peers))))
                         set)
@@ -77,9 +93,7 @@
                                                 :slot-id slot-id
                                                 :aligned-peers (if (state-task? replica job-id this-task-id)
                                                                  [id]
-                                                                 (find-physically-task-peers replica peer-opts id job-id this-task-id))
-                                                ;; Double check that peer site is correct
-                                                :site (peer-sites peer-id)}))
+                                                                 (find-physically-task-peers replica peer-opts id job-id this-task-id))}))
                                            peers))))
                           set)
         ack-subs (if (= (:onyx/type task-map) :input) 
@@ -89,10 +103,7 @@
                                     (map (fn [peer-id]
                                            {:src-peer-id peer-id
                                             :dst-task-id [job-id this-task-id]
-                                            ;; Always uses slot-id
-                                            :slot-id (get-in task-slot-ids [job-id this-task-id id])
-                                            ;; Double check that peer site is correct
-                                            :site (peer-sites peer-id)})
+                                            :slot-id (get-in task-slot-ids [job-id this-task-id id])})
                                          peers))))
                         set)
                    #{})
@@ -101,9 +112,7 @@
                              ;; Should we allocate a coordinator a unique uuid?
                              #{{:src-peer-id [:coordinator coordinator-id]
                                 :dst-task-id [job-id this-task-id]
-                                :slot-id all-slots
-                                ;; Double check that peer site is correct
-                                :site (peer-sites coordinator-id)}}  
+                                :slot-id all-slots}}  
                              #{})
                            #{})]
     {:pubs (into ack-pubs egress-pubs)
@@ -118,13 +127,13 @@
         remove-acker-subs (difference (:acker-subs old-pub-subs) (:acker-subs new-pub-subs))
         add-acker-subs (difference (:acker-subs new-pub-subs) (:acker-subs old-pub-subs))]
     (as-> messenger m
-      (reduce m/remove-publication m remove-pubs)
       (reduce m/add-publication m add-pubs)
-      (reduce m/remove-subscription m remove-subs)
       (reduce m/add-subscription m add-subs)
-      (reduce m/remove-ack-subscription m remove-acker-subs)
+      (reduce m/register-ticket m (:subs new-pub-subs))
       (reduce m/add-ack-subscription m add-acker-subs)
-      (reduce m/register-ticket m (:subs new-pub-subs)))))
+      (reduce m/remove-publication m remove-pubs)
+      (reduce m/remove-subscription m remove-subs)
+      (reduce m/remove-ack-subscription m remove-acker-subs))))
 
 (defn assert-consistent-messenger-state [messenger pub-subs pre-post]
   (assert (= (count (:pubs pub-subs))
