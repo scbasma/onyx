@@ -11,7 +11,7 @@
             [onyx.messaging.messenger :as m]
             [onyx.compression.nippy :refer [messaging-compress messaging-decompress]]
             [onyx.static.default-vals :refer [defaults arg-or-default]])
-  (:import [io.aeron Aeron Aeron$Context ControlledFragmentAssembler Publication Subscription UnavailableImageHandler FragmentAssembler]
+  (:import [io.aeron Aeron Aeron$Context ControlledFragmentAssembler Publication Subscription UnavailableImageHandler AvailableImageHandler FragmentAssembler]
            [io.aeron.logbuffer FragmentHandler]
            [io.aeron.driver MediaDriver MediaDriver$Context ThreadingMode]
            [io.aeron.logbuffer ControlledFragmentHandler ControlledFragmentHandler$Action]
@@ -218,6 +218,13 @@
          (= (m/epoch messenger) (:epoch barrier-val))
          (:emitted? barrier-val))))
 
+;; TODO, do not re-ify on every read
+(defn controlled-fragment-data-handler [f]
+  (ControlledFragmentAssembler.
+    (reify ControlledFragmentHandler
+      (onFragment [this buffer offset length header]
+        (f buffer offset length header)))))
+
 ;; TODO, should probably check against slot id for safety's sake in case we merge streams later
 (defn handle-read-segments
   [messenger results barrier ticket dst-task-id src-peer-id buffer offset length header]
@@ -232,6 +239,10 @@
                            (not= (:src-peer-id message) src-peer-id))
                        (= (:replica-version message)
                           (m/replica-version messenger)))
+                  ControlledFragmentHandler$Action/CONTINUE
+
+                  (< (:replica-version message)
+                     (m/replica-version messenger))
                   ControlledFragmentHandler$Action/CONTINUE
 
                   (> (:replica-version message)
@@ -267,39 +278,8 @@
 
                   :else
                   (throw (Exception. "Should not happen?")))]
-    (println "Read message" dst-task-id src-peer-id message ret [:handle-message dst-task-id src-peer-id])
+    (println [:handle-message dst-task-id src-peer-id] (.position header) message ret)
     (add-tracked-message! messenger dst-task-id src-peer-id message ret [:handle-message dst-task-id src-peer-id])
-    ret))
-
-;; TODO, do not re-ify on every read
-(defn controlled-fragment-data-handler [f]
-  (ControlledFragmentAssembler.
-    (reify ControlledFragmentHandler
-      (onFragment [this buffer offset length header]
-        (f buffer offset length header)))))
-
-(defn handle-poll-new-barrier
-  [messenger barrier dst-task-id src-peer-id buffer offset length header]
-  (let [ba (byte-array length)
-        _ (.getBytes ^UnsafeBuffer buffer offset ba)
-        message (messaging-decompress ba)
-        ret (cond (and (or (not= (:dst-task-id message) dst-task-id)
-                           (not= (:src-peer-id message) src-peer-id))
-                       (= (:replica-version message) (m/replica-version messenger)))
-                  (do (println "Dropping handle" message)
-                      ControlledFragmentHandler$Action/CONTINUE)
-
-                  (and (barrier? message)
-                       (is-next-barrier? messenger message))
-                  (do 
-                   (println "GOT NEW BARRIER ON RECOVER" (:id messenger) (into {} message) dst-task-id)
-                   (reset! barrier message)
-                   ControlledFragmentHandler$Action/BREAK)
-
-                  :else
-                  ControlledFragmentHandler$Action/ABORT)]
-    (println (:id messenger) "POLL NEW BARRIER" ret (into {} message))
-    (add-tracked-message! messenger dst-task-id src-peer-id message ret [:poll-new-barrier dst-task-id src-peer-id])
     ret))
 
 (defn poll-messages! [messenger sub-info]
@@ -319,7 +299,31 @@
           (persistent! results)))
       [])))
 
+(defn handle-poll-new-barrier
+  [messenger barrier dst-task-id src-peer-id buffer offset length header]
+  (let [ba (byte-array length)
+        _ (.getBytes ^UnsafeBuffer buffer offset ba)
+        message (messaging-decompress ba)
+        ret (cond (< (:replica-version message)
+                     (m/replica-version messenger))
+                  ControlledFragmentHandler$Action/CONTINUE
 
+                  (and (or (not= (:dst-task-id message) dst-task-id)
+                           (not= (:src-peer-id message) src-peer-id))
+                       (= (:replica-version message) (m/replica-version messenger)))
+                  ControlledFragmentHandler$Action/CONTINUE
+
+                  (and (barrier? message)
+                       (is-next-barrier? messenger message))
+                  (do 
+                   (reset! barrier message)
+                   ControlledFragmentHandler$Action/BREAK)
+
+                  :else
+                  ControlledFragmentHandler$Action/ABORT)]
+    (println [:poll-barrier dst-task-id src-peer-id] (.position header) message ret)
+    (add-tracked-message! messenger dst-task-id src-peer-id message ret [:poll-new-barrier dst-task-id src-peer-id])
+    ret))
 
 (defn poll-new-replica! [messenger sub-info]
   (let [{:keys [src-peer-id dst-task-id subscription barrier]} sub-info
@@ -357,11 +361,8 @@
                    ControlledFragmentHandler$Action/BREAK)
 
                   :else
-                  (do
-                   (println "Skipping over something, possibly naughtily")
-
-                   ControlledFragmentHandler$Action/CONTINUE))]
-
+                  (throw (Exception. "Shouldn't be any non ack messages in the stream")))]
+    (println [:poll-acks dst-task-id src-peer-id] (.position header) message ret)
     (add-tracked-message! messenger dst-task-id src-peer-id message ret [:poll-acks dst-task-id src-peer-id])
     ret))
 
@@ -414,9 +415,13 @@
 (defn unavailable-image-drainer [sub-info]
   (reify UnavailableImageHandler
     (onUnavailableImage [this image] 
-      (println "UNAVAILABLE image" (.sessionId image) sub-info)
+      (println "UNAVAILABLE image" (.sessionId image) (.position image) sub-info)
       (poll-drain-debug sub-info image))))
 
+(defn available-image [sub-info]
+  (reify AvailableImageHandler
+    (onAvailableImage [this image] 
+      (println "AVAILABLE image" (.sessionId image) (.position image) sub-info))))
 
 (defn new-subscription 
   [{:keys [messenger-group id] :as messenger}
@@ -430,6 +435,7 @@
                           (taoensso.timbre/warn x "Aeron messaging subscriber error")))
         ctx (-> (Aeron$Context.)
                 (.errorHandler error-handler)
+                (.availableImageHandler (available-image sub-info))
                 (.unavailableImageHandler (unavailable-image-drainer sub-info)))
         conn (Aeron/connect ctx)
         bind-addr (:bind-addr messenger-group)
@@ -442,6 +448,7 @@
            :subscription subscription
            :stream stream
            :conn conn
+           :debug-id (java.util.UUID/randomUUID)
            :barrier-ack (atom nil)
            :barrier (atom nil))))
 
@@ -651,20 +658,41 @@
               task-slot))))))
 
   (poll-recover [messenger]
-    ;(info "ON REC" id (m/all-barriers-seen? messenger))
-    (loop [sbs subscriptions]
-      (let [sub (first sbs)] 
-        (when sub 
-          (println "WHEN SUB" (m/epoch messenger) (hash-sub sub) (mapv (fn [i] [(.correlationId i) (.sourceIdentity i)]) (.images (:subscription sub))) sub)
-          (when-not @(:barrier sub)
-            (poll-new-replica! messenger sub))
-          (recur (rest sbs)))))
-    (if (m/all-barriers-seen? messenger)
-      (let [_ (info "ALL SEEN SUBS " (vec subscriptions))
-            recover (:recover @(:barrier (first subscriptions)))] 
-        (assert (= 1 (count (set (map (comp :recover deref :barrier) subscriptions)))))
-        (assert recover)
-        recover)))
+    (when-not (= 1 (count 
+            (set (map (fn [sub]
+                        (set (map (fn [i] [(.isClosed i) (.correlationId i)]) 
+                                  (.images (:subscription sub)))))
+                      subscriptions))))
+      (println "SOME SUBSCRIPTIONS ARE NOT ALL IN THE SAME STATE"))
+    (when (= 1 (count 
+                (set (map (fn [sub]
+                            (set (map (fn [i] [(.isClosed i) (.correlationId i)]) 
+                                      (.images (:subscription sub)))))
+                          subscriptions))))
+      (loop [sbs subscriptions]
+        (let [sub (first sbs)] 
+          (when sub 
+            (println "WHEN SUB" (m/epoch messenger) (hash-sub sub)
+                     (.channel (:subscription sub))
+                     (.streamId (:subscription sub))
+
+                     (mapv (fn [i] [(.position i) (.correlationId i) (.sourceIdentity i)]) (.images (:subscription sub))) sub)
+            (when-not @(:barrier sub)
+              (poll-new-replica! messenger sub)
+              (println "AFTER SUB" (m/epoch messenger) (hash-sub sub)
+                       (.channel (:subscription sub))
+                       (.streamId (:subscription sub))
+
+                       (mapv (fn [i] [(.position i) (.correlationId i) (.sourceIdentity i)]) (.images (:subscription sub))) sub)
+
+              )
+            (recur (rest sbs)))))
+      (if (m/all-barriers-seen? messenger)
+        (let [_ (info "ALL SEEN SUBS " (vec subscriptions))
+              recover (:recover @(:barrier (first subscriptions)))] 
+          (assert (= 1 (count (set (map (comp :recover deref :barrier) subscriptions)))))
+          (assert recover)
+          recover))))
 
   ;; FIXME RENAME TO OFFERBARRIER
   (emit-barrier [messenger publication]
