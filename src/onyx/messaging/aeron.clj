@@ -11,7 +11,7 @@
             [onyx.messaging.messenger :as m]
             [onyx.compression.nippy :refer [messaging-compress messaging-decompress]]
             [onyx.static.default-vals :refer [defaults arg-or-default]])
-  (:import [io.aeron Aeron Aeron$Context ControlledFragmentAssembler Publication Subscription FragmentAssembler]
+  (:import [io.aeron Aeron Aeron$Context ControlledFragmentAssembler Publication Subscription UnavailableImageHandler FragmentAssembler]
            [io.aeron.logbuffer FragmentHandler]
            [io.aeron.driver MediaDriver MediaDriver$Context ThreadingMode]
            [io.aeron.logbuffer ControlledFragmentHandler ControlledFragmentHandler$Action]
@@ -47,6 +47,10 @@
                                       message
                                       poll-ret]))))
 
+
+
+(comment 
+
 (filter (fn [v]
           (let [msg (nth v 3)]
             ;(println msg)
@@ -55,8 +59,6 @@
                    (= (:epoch msg) 1))))
 
         (reduce into [] (vals (reduce merge (vals @tracked-messages)))))
-
-(comment 
  
 (filter (fn [v]
           (let [msg (nth v 3)]
@@ -117,8 +119,8 @@
         (= media-driver :shared) ThreadingMode/SHARED
         (= media-driver :shared-network) ThreadingMode/SHARED_NETWORK))
 
-(defn stream-id [job-id task-id slot-id]
-  (hash [job-id task-id slot-id]))
+(defn stream-id [job-id task-id slot-id site]
+  (hash [job-id task-id slot-id site]))
 
 ;; TODO, make sure no stream-id collision issues
 (defmethod m/assign-task-resources :aeron
@@ -226,10 +228,10 @@
         n-desired-messages 2
         ticket-val @ticket
         position (.position header)
-        ret (cond (or (not= (:dst-task-id message) dst-task-id)
-                      (not= (:src-peer-id message) src-peer-id)
-                      (< (:replica-version message)
-                         (m/replica-version messenger)))
+        ret (cond (and (or (not= (:dst-task-id message) dst-task-id)
+                           (not= (:src-peer-id message) src-peer-id))
+                       (= (:replica-version message)
+                          (m/replica-version messenger)))
                   ControlledFragmentHandler$Action/CONTINUE
 
                   (> (:replica-version message)
@@ -265,6 +267,7 @@
 
                   :else
                   (throw (Exception. "Should not happen?")))]
+    (println "Read message" dst-task-id src-peer-id message ret [:handle-message dst-task-id src-peer-id])
     (add-tracked-message! messenger dst-task-id src-peer-id message ret [:handle-message dst-task-id src-peer-id])
     ret))
 
@@ -280,9 +283,9 @@
   (let [ba (byte-array length)
         _ (.getBytes ^UnsafeBuffer buffer offset ba)
         message (messaging-decompress ba)
-        ret (cond (or (not= (:dst-task-id message) dst-task-id)
-                      (not= (:src-peer-id message) src-peer-id)
-                      (< (:replica-version message) (m/replica-version messenger)))
+        ret (cond (and (or (not= (:dst-task-id message) dst-task-id)
+                           (not= (:src-peer-id message) src-peer-id))
+                       (= (:replica-version message) (m/replica-version messenger)))
                   (do (println "Dropping handle" message)
                       ControlledFragmentHandler$Action/CONTINUE)
 
@@ -316,6 +319,8 @@
           (persistent! results)))
       [])))
 
+
+
 (defn poll-new-replica! [messenger sub-info]
   (let [{:keys [src-peer-id dst-task-id subscription barrier]} sub-info
         sub-ticket (subscription-ticket messenger sub-info)]
@@ -336,10 +341,10 @@
                      (m/replica-version messenger))
                   ControlledFragmentHandler$Action/CONTINUE
 
-                  (not= (:dst-task-id message) dst-task-id)
-                  ControlledFragmentHandler$Action/CONTINUE
-
-                  (not= (:src-peer-id message) src-peer-id)
+                  (and (or (not= (:dst-task-id message) dst-task-id)
+                           (not= (:src-peer-id message) src-peer-id))
+                       (= (:replica-version message) 
+                          (m/replica-version messenger)))
                   ControlledFragmentHandler$Action/CONTINUE
 
                   (> (:replica-version message) 
@@ -389,11 +394,33 @@
       messenger)))
 
 (defn hash-sub [sub-info]
-  (hash (select-keys sub-info [:src-peer-id :dst-task-id :slot-id])))
+  (hash (select-keys sub-info [:src-peer-id :dst-task-id :slot-id :site])))
+
+(defn handle-drain
+  [sub-info buffer offset length header]
+  (let [ba (byte-array length)
+        _ (.getBytes ^UnsafeBuffer buffer offset ba)
+        message (messaging-decompress ba)]
+    (println "DRAIN MESSAGE SUB hash" (hash-sub sub-info) sub-info "message" message)
+    ControlledFragmentHandler$Action/CONTINUE))
+
+(defn poll-drain-debug [sub-info image]
+  (.println (System/out) (str "SUB" sub-info "imaage" image))
+  (let [fh (controlled-fragment-data-handler
+            (fn [buffer offset length header]
+              (handle-drain sub-info buffer offset length header)))]
+    (while (not (zero? (.controlledPoll image ^ControlledFragmentHandler fh fragment-limit-receiver))))))
+
+(defn unavailable-image-drainer [sub-info]
+  (reify UnavailableImageHandler
+    (onUnavailableImage [this image] 
+      (println "UNAVAILABLE image" (.sessionId image) sub-info)
+      (poll-drain-debug sub-info image))))
+
 
 (defn new-subscription 
   [{:keys [messenger-group id] :as messenger}
-   {:keys [job-id src-peer-id dst-task-id slot-id] :as sub-info}]
+   {:keys [job-id src-peer-id dst-task-id slot-id site] :as sub-info}]
   (println "NEW SUB" sub-info (hash-sub sub-info))
   (info "new subscriber for " job-id src-peer-id dst-task-id)
   (let [error-handler (reify ErrorHandler
@@ -402,12 +429,13 @@
                           ;; FIXME: Reboot peer
                           (taoensso.timbre/warn x "Aeron messaging subscriber error")))
         ctx (-> (Aeron$Context.)
-                (.errorHandler error-handler))
+                (.errorHandler error-handler)
+                (.unavailableImageHandler (unavailable-image-drainer sub-info)))
         conn (Aeron/connect ctx)
         bind-addr (:bind-addr messenger-group)
         port (:port messenger-group)
         channel (mc/aeron-channel bind-addr port)
-        stream (stream-id job-id dst-task-id slot-id)
+        stream (stream-id job-id dst-task-id slot-id site)
         _ (println "Add subscription " channel stream conn)
         subscription (.addSubscription conn channel stream)]
     (assoc sub-info
@@ -428,7 +456,7 @@
         ctx (-> (Aeron$Context.)
                 (.errorHandler error-handler))
         conn (Aeron/connect ctx)
-        stream (stream-id job-id dst-task-id slot-id)
+        stream (stream-id job-id dst-task-id slot-id site)
         _ (println "Creating new pub" channel stream)
         pub (.addPublication conn channel stream)]
     (assoc pub-info :conn conn :publication pub :stream stream)))
@@ -438,8 +466,9 @@
 
 (defn close-sub! [sub-info]
   (println "CLOSED SUB" sub-info "hash" (hash-sub sub-info))
-  (.close (:conn sub-info))
-  (.close ^Subscription (:subscription sub-info)))
+  (.close ^Subscription (:subscription sub-info))
+  (.close (:conn sub-info)))
+
 
 (defn equiv-sub [sub-info1 sub-info2]
   (= (select-keys sub-info1 [:src-peer-id :dst-task-id :slot-id]) 
@@ -455,8 +484,8 @@
 
 (defn close-pub! [pub-info]
   (println "CLOSED PUB" pub-info)
-  (.close (:conn pub-info))
-  (.close ^Publication (:publication pub-info)))
+  (.close ^Publication (:publication pub-info))
+  (.close (:conn pub-info)))
 
 (defn equiv-pub [pub-info1 pub-info2]
   (= (select-keys pub-info1 [:src-peer-id :dst-task-id :slot-id :site]) 

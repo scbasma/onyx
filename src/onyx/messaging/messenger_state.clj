@@ -91,6 +91,7 @@
                                                {:src-peer-id peer-id
                                                 :dst-task-id [job-id this-task-id]
                                                 :slot-id slot-id
+                                                :site (peer-sites id)
                                                 :aligned-peers (if (state-task? replica job-id this-task-id)
                                                                  [id]
                                                                  (find-physically-task-peers replica peer-opts id job-id this-task-id))}))
@@ -103,6 +104,7 @@
                                     (map (fn [peer-id]
                                            {:src-peer-id peer-id
                                             :dst-task-id [job-id this-task-id]
+                                            :site (peer-sites id)
                                             :slot-id (get-in task-slot-ids [job-id this-task-id id])})
                                          peers))))
                         set)
@@ -112,6 +114,7 @@
                              ;; Should we allocate a coordinator a unique uuid?
                              #{{:src-peer-id [:coordinator coordinator-id]
                                 :dst-task-id [job-id this-task-id]
+                                :site (peer-sites id)
                                 :slot-id all-slots}}  
                              #{})
                            #{})]

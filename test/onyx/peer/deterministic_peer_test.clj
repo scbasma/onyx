@@ -145,8 +145,12 @@
                                                :onyx/fn ::add-path 
                                                :onyx/group-by-key :n
                                                :onyx/flux-policy :recover
+                                               ;; FIXME AT ONE TO TEST
+                                               ;:onyx/min-peers 1
+                                               ;:onyx/max-peers 1
                                                :onyx/min-peers 2
-                                               :onyx/max-peers 2)
+                                               :onyx/max-peers 2
+                                               )
                              :args [::update-state-atom!]}
                             {:name :out
                              :type :null-out
