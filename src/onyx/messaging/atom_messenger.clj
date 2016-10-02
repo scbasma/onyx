@@ -140,12 +140,12 @@
   (register-ticket [messenger sub-info]
     messenger)
 
-  (emit-barrier [messenger publication]
-    (onyx.messaging.messenger/emit-barrier messenger publication {}))
+  (offer-barrier [messenger publication]
+    (onyx.messaging.messenger/offer-barrier messenger publication {}))
 
-  (emit-barrier
+  (offer-barrier
     [messenger publication barrier-opts]
-    (update-messenger-atom! messenger m/emit-barrier publication barrier-opts)
+    (update-messenger-atom! messenger m/offer-barrier publication barrier-opts)
     :success)
   
   (unblock-subscriptions! 
@@ -163,9 +163,9 @@
   (all-acks-seen? [messenger]
     (m/all-acks-seen? (switch-peer @immutable-messenger id)))
 
-  (emit-barrier-ack
+  (offer-barrier-ack
     [messenger publication]
-    (update-messenger-atom! messenger m/emit-barrier-ack publication)
+    (update-messenger-atom! messenger m/offer-barrier-ack publication)
     :success))
 
 (defmethod m/build-messenger :atom [peer-config messenger-group id]

@@ -84,7 +84,7 @@
     (loop [pubs rem-barriers]
       (if-not (empty? pubs)
         (let [pub (first pubs)
-              ret (m/emit-barrier messenger pub barrier-opts)]
+              ret (m/offer-barrier messenger pub barrier-opts)]
           (swap! send-failures conj [ret (m/replica-version messenger) pub (m/epoch messenger)])
           (case ret
             :success (recur (rest pubs))

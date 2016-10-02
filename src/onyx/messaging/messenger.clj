@@ -39,8 +39,8 @@
   (poll-recover [messenger])
 
   (offer-segments [messenger messages task-slots])
-  (emit-barrier [messenger publication] [messenger publication barrier-opts])
-  (emit-barrier-ack [messenger publication])
+  (offer-barrier [messenger publication] [messenger publication barrier-opts])
+  (offer-barrier-ack [messenger publication])
   (unblock-subscriptions! [messenger])
   (replica-version [messenger])
   (set-replica-version [messenger replica-version])

@@ -692,11 +692,11 @@
           recover))))
 
   ;; FIXME RENAME TO OFFERBARRIER
-  (emit-barrier [messenger publication]
-    (onyx.messaging.messenger/emit-barrier messenger publication {}))
+  (offer-barrier [messenger publication]
+    (onyx.messaging.messenger/offer-barrier messenger publication {}))
 
   ;; FIXME RENAME TO OFFERBARRIER
-  (emit-barrier [messenger publication barrier-opts]
+  (offer-barrier [messenger publication barrier-opts]
     (let [barrier (merge (->Barrier id (:dst-task-id publication) (m/replica-version messenger) (m/epoch messenger))
                          (assoc barrier-opts 
                                 :site (:site publication)
@@ -728,7 +728,7 @@
     (empty? (remove #(found-next-barrier? messenger %) 
                     subscriptions)))
 
-  (emit-barrier-ack [messenger publication]
+  (offer-barrier-ack [messenger publication]
     (let [ack (->BarrierAck id 
                             (:dst-task-id publication) 
                             (m/replica-version messenger) 

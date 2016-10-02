@@ -324,10 +324,10 @@
   (register-ticket [messenger sub-info]
     messenger)
 
-  (emit-barrier [messenger publication]
-    (onyx.messaging.messenger/emit-barrier messenger publication {}))
+  (offer-barrier [messenger publication]
+    (onyx.messaging.messenger/offer-barrier messenger publication {}))
 
-  (emit-barrier [messenger publication barrier-opts]
+  (offer-barrier [messenger publication barrier-opts]
     (write messenger 
            publication 
            (merge (->Barrier id (:dst-task-id publication) (m/replica-version messenger) (m/epoch messenger)) 
@@ -343,7 +343,7 @@
     (empty? (remove #(found-next-barrier? messenger %) 
                     (messenger->subscriptions messenger))))
 
-  (emit-barrier-ack [messenger publication]
+  (offer-barrier-ack [messenger publication]
     (write messenger publication (->BarrierAck id (:dst-task-id publication) (m/replica-version messenger) (m/epoch messenger)))))
 
 (defn immutable-messenger [peer-group]

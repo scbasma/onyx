@@ -150,7 +150,7 @@
    (loop [pubs (:publications context)]
      (if-not (empty? pubs)
        (let [pub (first pubs)
-             ret (m/emit-barrier messenger pub (:barrier-opts context))]
+             ret (m/offer-barrier messenger pub (:barrier-opts context))]
          #_(assert 
           (not (= {:dst-task-id [#uuid "144910a6-3ccc-404d-89aa-543031d45e79" :inc], 
                    :src-peer-id #uuid "2c16fb10-04a3-dc50-d673-7fb9e8ff8c01"
@@ -202,23 +202,23 @@
                                    :state 
                                    (mapv ws/export-state (:windows-state state)))))))
 
-(defn emit-barriers [{:keys [event messenger context] :as state}]
+(defn offer-barriers [{:keys [event messenger context] :as state}]
   (assert (#{:input :function} (:task-type event)))
-  (if (:emit-barriers? context)
+  (if (:offer-barriers? context)
     (let [new-state (offer-barriers state)]
       (when-not (= :blocked (:state new-state))
         (write-state-checkpoint! new-state))
       new-state)     
     state))
 
-(defn prepare-emit-barriers [{:keys [messenger] :as state}]
+(defn prepare-offer-barriers [{:keys [messenger] :as state}]
   (if (m/all-barriers-seen? messenger)
     (let [publications (m/publications messenger)]
       (-> state
           (update :messenger m/next-epoch)
           (record-pipeline-barrier)
           (assoc :context {:barrier-opts {}
-                           :emit-barriers? true
+                           :offer-barriers? true
                            :publications publications})))
     state))
 
@@ -235,7 +235,7 @@
    (loop [pubs (:publications context)]
      (if-not (empty? pubs)
        (let [pub (first pubs)
-             ret (m/emit-barrier-ack messenger pub)]
+             ret (m/offer-barrier-ack messenger pub)]
          (case ret
            :success (recur (rest pubs))
            :fail (-> state
@@ -471,7 +471,7 @@
     (do (assert (#{:start-processing 
                    :poll-recover
                    :recovering
-                   :emit-barriers
+                   :offer-barriers
                    :ack-barriers
                    :write-batch} (:lifecycle state)) 
                 (:lifecycle state))
@@ -487,11 +487,11 @@
                :recovering :start-processing
                :start-processing (case task-type 
                                    :input :input-poll-barriers
-                                   :function :prepare-emit-barriers
+                                   :function :prepare-offer-barriers
                                    :output :before-batch)
-               :input-poll-barriers :prepare-emit-barriers
-               :prepare-emit-barriers :emit-barriers
-               :emit-barriers (if (= task-type :input) 
+               :input-poll-barriers :prepare-offer-barriers
+               :prepare-offer-barriers :offer-barriers
+               :offer-barriers (if (= task-type :input) 
                                 :poll-acks
                                 :before-batch)
                :poll-acks :before-batch
@@ -516,9 +516,9 @@
       :recovering (recover-state state)
       :start-processing (start-processing state)
       :input-poll-barriers (input-poll-barriers state)
-      :prepare-emit-barriers (prepare-emit-barriers state)
-      :emit-barriers (emit-barriers state)
-      ;; Set some emitted. Return unfinished from emit-barrier, then turn it into being blocked
+      :prepare-offer-barriers (prepare-offer-barriers state)
+      :offer-barriers (offer-barriers state)
+      ;; Set some emitted. Return unfinished from offer-barrier, then turn it into being blocked
       ;; When finally unblocked, then can switch to next-epoch?
       ;; Possibly need to do a prepare step too
       :poll-acks (poll-acks state)
@@ -566,7 +566,7 @@
     (let [{:keys [task-kill-ch kill-ch task-information replica-atom opts state]} (:event init-state)] 
       (loop [prev-state init-state 
              replica-val @replica-atom]
-        ;; TODO add here :emit-barriers, emit-ack-barriers?
+        ;; TODO add here :offer-barriers, emit-ack-barriers?
         ;(println "Iteration " (:state prev-state))
         (info "Task Dropping back in " (:task-type (:event init-state)))
         (let [state (next-state prev-state replica-val)]
