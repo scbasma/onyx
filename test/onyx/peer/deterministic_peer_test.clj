@@ -395,7 +395,7 @@
                    [{:type :drain-commands}]
                    ;; Complete the job
                    ;; FIXME: not sure why so many iterations are required when using grouping
-                   (job-completion-cmds unique-groups jobs 1000)
+                   (job-completion-cmds unique-groups jobs 4000)
                    [{:type :drain-commands}])
         model (g/model-commands all-cmds)
         messenger-type :aeron
