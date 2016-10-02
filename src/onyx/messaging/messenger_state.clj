@@ -26,6 +26,9 @@
                       peer-site)))
          (filter task-peers))))
 
+(defn add-sub-hash [sub-info]
+  (assoc sub-info :hash (hash (select-keys sub-info [:dst-task-id :src-peer-id :slot-id :site]))))
+
 ;; Maybe set shared tickets somewhere?
 ;; Put with replica version, each one will run it, if any have set then don't reset for that replica version, job-id task-id
 (defn messenger-connections 

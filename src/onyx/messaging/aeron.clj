@@ -21,6 +21,12 @@
            [java.util.function Consumer]
            [java.util.concurrent TimeUnit]))
 
+
+(defn add-hash-key 
+  "Adds a hash key to a message to help track the message throughout its journey"
+  [message]
+  (assoc message :hash (hash message)))
+
 (defn barrier? [v]
   (instance? onyx.types.Barrier v))
 
@@ -415,20 +421,21 @@
 (defn unavailable-image-drainer [sub-info]
   (reify UnavailableImageHandler
     (onUnavailableImage [this image] 
-      (println "UNAVAILABLE image" (.sessionId image) (.position image) sub-info)
+      (println "UNAVAILABLE image" (.position image) (.sessionId image) sub-info)
       (poll-drain-debug sub-info image))))
 
 (defn available-image [sub-info]
   (reify AvailableImageHandler
     (onAvailableImage [this image] 
-      (println "AVAILABLE image" (.sessionId image) (.position image) sub-info))))
+      (println "AVAILABLE image" (.position image) (.sessionId image) sub-info))))
 
 (defn new-subscription 
   [{:keys [messenger-group id] :as messenger}
    {:keys [job-id src-peer-id dst-task-id slot-id site] :as sub-info}]
   (println "NEW SUB" sub-info (hash-sub sub-info))
   (info "new subscriber for " job-id src-peer-id dst-task-id)
-  (let [error-handler (reify ErrorHandler
+  (let [_ (println "NEW SUB" sub-info)
+        error-handler (reify ErrorHandler
                         (onError [this x] 
                           (println "Aeron messaging subscriber error" x)
                           ;; FIXME: Reboot peer
@@ -448,7 +455,6 @@
            :subscription subscription
            :stream stream
            :conn conn
-           :debug-id (java.util.UUID/randomUUID)
            :barrier-ack (atom nil)
            :barrier (atom nil))))
 
