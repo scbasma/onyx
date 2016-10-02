@@ -239,11 +239,11 @@
                            (not= (:src-peer-id message) src-peer-id))
                        (= (:replica-version message)
                           (m/replica-version messenger)))
-                  ControlledFragmentHandler$Action/CONTINUE
+                  ControlledFragmentHandler$Action/COMMIT
 
                   (< (:replica-version message)
                      (m/replica-version messenger))
-                  ControlledFragmentHandler$Action/CONTINUE
+                  ControlledFragmentHandler$Action/COMMIT
 
                   (> (:replica-version message)
                      (m/replica-version messenger))
@@ -264,7 +264,7 @@
                      (do 
                       (assert (coll? (:payload message)))
                       (reduce conj! results (:payload message))))
-                   ControlledFragmentHandler$Action/CONTINUE)
+                   ControlledFragmentHandler$Action/COMMIT)
 
                   (and (barrier? message)
                        (is-next-barrier? messenger message))
@@ -306,12 +306,12 @@
         message (messaging-decompress ba)
         ret (cond (< (:replica-version message)
                      (m/replica-version messenger))
-                  ControlledFragmentHandler$Action/CONTINUE
+                  ControlledFragmentHandler$Action/COMMIT
 
                   (and (or (not= (:dst-task-id message) dst-task-id)
                            (not= (:src-peer-id message) src-peer-id))
                        (= (:replica-version message) (m/replica-version messenger)))
-                  ControlledFragmentHandler$Action/CONTINUE
+                  ControlledFragmentHandler$Action/COMMIT
 
                   (and (barrier? message)
                        (is-next-barrier? messenger message))
@@ -343,13 +343,13 @@
         message (messaging-decompress ba)
         ret (cond (< (:replica-version message) 
                      (m/replica-version messenger))
-                  ControlledFragmentHandler$Action/CONTINUE
+                  ControlledFragmentHandler$Action/COMMIT
 
                   (and (or (not= (:dst-task-id message) dst-task-id)
                            (not= (:src-peer-id message) src-peer-id))
                        (= (:replica-version message) 
                           (m/replica-version messenger)))
-                  ControlledFragmentHandler$Action/CONTINUE
+                  ControlledFragmentHandler$Action/COMMIT
 
                   (> (:replica-version message) 
                      (m/replica-version messenger))
@@ -379,7 +379,7 @@
 ;        (info "GOT NEW BARRIER ACK" (into {} message))
 ;        (reset! barrier-ack message)
 ;        ControlledFragmentHandler$Action/BREAK)
-;       ControlledFragmentHandler$Action/CONTINUE)))
+;       ControlledFragmentHandler$Action/COMMIT)))
 
 (defn poll-acks! [messenger sub-info]
   (if @(:barrier-ack sub-info)
@@ -394,16 +394,13 @@
       (.controlledPoll ^Subscription subscription ^ControlledFragmentHandler fh fragment-limit-receiver)
       messenger)))
 
-(defn hash-sub [sub-info]
-  (hash (select-keys sub-info [:src-peer-id :dst-task-id :slot-id :site])))
-
 (defn handle-drain
   [sub-info buffer offset length header]
   (let [ba (byte-array length)
         _ (.getBytes ^UnsafeBuffer buffer offset ba)
         message (messaging-decompress ba)]
-    (println "DRAIN MESSAGE SUB hash" (hash-sub sub-info) sub-info "message" message)
-    ControlledFragmentHandler$Action/CONTINUE))
+    (println "DRAIN MESSAGE position" (.position header) "sub" sub-info "message" message)
+    ControlledFragmentHandler$Action/COMMIT))
 
 (defn poll-drain-debug [sub-info image]
   (.println (System/out) (str "SUB" sub-info "imaage" image))
@@ -426,9 +423,10 @@
 (defn new-subscription 
   [{:keys [messenger-group id] :as messenger}
    {:keys [job-id src-peer-id dst-task-id slot-id site] :as sub-info}]
-  (println "NEW SUB" sub-info (hash-sub sub-info))
   (info "new subscriber for " job-id src-peer-id dst-task-id)
-  (let [error-handler (reify ErrorHandler
+  (let [sub-hash (hash [src-peer-id dst-task-id slot-id site])
+        _ (println "NEW SUB" sub-info "hash" sub-hash)
+        error-handler (reify ErrorHandler
                         (onError [this x] 
                           (println "Aeron messaging subscriber error" x)
                           ;; FIXME: Reboot peer
@@ -448,7 +446,7 @@
            :subscription subscription
            :stream stream
            :conn conn
-           :debug-id (java.util.UUID/randomUUID)
+           :hash sub-hash
            :barrier-ack (atom nil)
            :barrier (atom nil))))
 
@@ -472,7 +470,7 @@
   (conj (or subscriptions []) sub-info))
 
 (defn close-sub! [sub-info]
-  (println "CLOSED SUB" sub-info "hash" (hash-sub sub-info))
+  (println "CLOSED SUB" sub-info)
   (.close ^Subscription (:subscription sub-info))
   (.close (:conn sub-info)))
 
@@ -672,14 +670,13 @@
       (loop [sbs subscriptions]
         (let [sub (first sbs)] 
           (when sub 
-            (println "WHEN SUB" (m/epoch messenger) (hash-sub sub)
+            (println "WHEN SUB" (m/epoch messenger)
                      (.channel (:subscription sub))
                      (.streamId (:subscription sub))
-
                      (mapv (fn [i] [(.position i) (.correlationId i) (.sourceIdentity i)]) (.images (:subscription sub))) sub)
             (when-not @(:barrier sub)
               (poll-new-replica! messenger sub)
-              (println "AFTER SUB" (m/epoch messenger) (hash-sub sub)
+              (println "AFTER SUB" (m/epoch messenger)
                        (.channel (:subscription sub))
                        (.streamId (:subscription sub))
 
