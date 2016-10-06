@@ -218,6 +218,41 @@
          (= (m/epoch messenger) (:epoch barrier-val))
          (:emitted? barrier-val))))
 
+(defprotocol PartialSubscriber 
+  (set-messenger [this messenger]))
+  
+(deftype RecoverFragmentHandler [src-peer-id dst-task-id barrier ^:unsynchronized-mutable messenger]
+  PartialSubscriber
+  (set-messenger [this new-messenger]
+    (set! messenger new-messenger)
+    this)
+  ControlledFragmentHandler
+  (onFragment [this buffer offset length header]
+    (let [ba (byte-array length)
+          _ (.getBytes ^UnsafeBuffer buffer offset ba)
+          message (messaging-decompress ba)
+          ret (cond (< (:replica-version message)
+                       (m/replica-version messenger))
+                    ControlledFragmentHandler$Action/CONTINUE
+
+                    (and (or (not= (:dst-task-id message) dst-task-id)
+                             (not= (:src-peer-id message) src-peer-id))
+                         (= (:replica-version message) (m/replica-version messenger)))
+                    ControlledFragmentHandler$Action/CONTINUE
+
+                    (and (barrier? message)
+                         (is-next-barrier? messenger message))
+                    (do 
+                     (reset! barrier message)
+                     ControlledFragmentHandler$Action/BREAK)
+
+                    :else
+                    ControlledFragmentHandler$Action/ABORT)]
+      (add-tracked-message! messenger dst-task-id src-peer-id message ret [:poll-new-barrier dst-task-id src-peer-id])
+      ret)))
+
+
+
 ;; TODO, do not re-ify on every read
 (defn controlled-fragment-data-handler [f]
   (ControlledFragmentAssembler.
@@ -227,7 +262,7 @@
 
 ;; TODO, should probably check against slot id for safety's sake in case we merge streams later
 (defn handle-read-segments
-  [messenger results barrier ticket dst-task-id src-peer-id buffer offset length header]
+  [messenger results barrier ticket sub-hash dst-task-id src-peer-id buffer offset length header]
   (let [ba (byte-array length)
         _ (.getBytes ^UnsafeBuffer buffer offset ba)
         message (messaging-decompress ba)
@@ -278,7 +313,7 @@
 
                   :else
                   (throw (Exception. "Should not happen?")))]
-    (println [:handle-message dst-task-id src-peer-id] (.position header) message ret)
+    (println [:handle-message :hash sub-hash dst-task-id src-peer-id] (.position header) message ret)
     (add-tracked-message! messenger dst-task-id src-peer-id message ret [:handle-message dst-task-id src-peer-id])
     ret))
 
@@ -294,36 +329,36 @@
               ;; Put the fragment handler in the sub info?
               fh (controlled-fragment-data-handler
                   (fn [buffer offset length header]
-                    (handle-read-segments messenger results barrier (:ticket sub-ticket) dst-task-id src-peer-id buffer offset length header)))]
+                    (handle-read-segments messenger results barrier (:ticket sub-ticket) (:hash sub-info) dst-task-id src-peer-id buffer offset length header)))]
           (.controlledPoll ^Subscription subscription ^ControlledFragmentHandler fh fragment-limit-receiver)
           (persistent! results)))
       [])))
 
-(defn handle-poll-new-barrier
-  [messenger barrier dst-task-id src-peer-id buffer offset length header]
-  (let [ba (byte-array length)
-        _ (.getBytes ^UnsafeBuffer buffer offset ba)
-        message (messaging-decompress ba)
-        ret (cond (< (:replica-version message)
-                     (m/replica-version messenger))
-                  ControlledFragmentHandler$Action/CONTINUE
+; (defn handle-poll-new-barrier
+;   [messenger barrier sub-hash dst-task-id src-peer-id buffer offset length header]
+;   (let [ba (byte-array length)
+;         _ (.getBytes ^UnsafeBuffer buffer offset ba)
+;         message (messaging-decompress ba)
+;         ret (cond (< (:replica-version message)
+;                      (m/replica-version messenger))
+;                   ControlledFragmentHandler$Action/CONTINUE
 
-                  (and (or (not= (:dst-task-id message) dst-task-id)
-                           (not= (:src-peer-id message) src-peer-id))
-                       (= (:replica-version message) (m/replica-version messenger)))
-                  ControlledFragmentHandler$Action/CONTINUE
+;                   (and (or (not= (:dst-task-id message) dst-task-id)
+;                            (not= (:src-peer-id message) src-peer-id))
+;                        (= (:replica-version message) (m/replica-version messenger)))
+;                   ControlledFragmentHandler$Action/CONTINUE
 
-                  (and (barrier? message)
-                       (is-next-barrier? messenger message))
-                  (do 
-                   (reset! barrier message)
-                   ControlledFragmentHandler$Action/BREAK)
+;                   (and (barrier? message)
+;                        (is-next-barrier? messenger message))
+;                   (do 
+;                    (reset! barrier message)
+;                    ControlledFragmentHandler$Action/BREAK)
 
-                  :else
-                  ControlledFragmentHandler$Action/ABORT)]
-    (println [:poll-barrier dst-task-id src-peer-id] (.position header) message ret)
-    (add-tracked-message! messenger dst-task-id src-peer-id message ret [:poll-new-barrier dst-task-id src-peer-id])
-    ret))
+;                   :else
+;                   ControlledFragmentHandler$Action/ABORT)]
+;     (println [:poll-barrier :hash sub-hash dst-task-id src-peer-id] (.position header) message ret)
+;     (add-tracked-message! messenger dst-task-id src-peer-id message ret [:poll-new-barrier dst-task-id src-peer-id])
+;     ret))
 
 (defn poll-new-replica! [messenger sub-info]
   (let [{:keys [src-peer-id dst-task-id subscription barrier]} sub-info
@@ -331,13 +366,13 @@
     ;; May not need to check for alignment here, can prob just do in :recover
     (println "Poll new replica, aligned" (subscription-aligned? sub-ticket))
     (if (subscription-aligned? sub-ticket)
-      (let [fh (controlled-fragment-data-handler
-                (fn [buffer offset length header]
-                  (handle-poll-new-barrier messenger barrier dst-task-id src-peer-id buffer offset length header)))]
-        (.controlledPoll ^Subscription subscription ^ControlledFragmentHandler fh fragment-limit-receiver))
+      (let [recover-handler (:recover-handler sub-info)]
+        (assert recover-handler)
+        (set-messenger recover-handler messenger)
+        (.controlledPoll ^Subscription subscription ^ControlledFragmentHandler recover-handler fragment-limit-receiver))
       (info "SUB NOT ALIGNED"))))
 
-(defn handle-poll-acks [messenger barrier-ack dst-task-id src-peer-id buffer offset length header]
+(defn handle-poll-acks [messenger barrier-ack sub-hash dst-task-id src-peer-id buffer offset length header]
   (let [ba (byte-array length)
         _ (.getBytes ^UnsafeBuffer buffer offset ba)
         message (messaging-decompress ba)
@@ -362,7 +397,7 @@
 
                   :else
                   (throw (Exception. "Shouldn't be any non ack messages in the stream")))]
-    (println [:poll-acks dst-task-id src-peer-id] (.position header) message ret)
+    (println [:poll-acks :hash sub-hash dst-task-id src-peer-id] (.position header) message ret)
     (add-tracked-message! messenger dst-task-id src-peer-id message ret [:poll-acks dst-task-id src-peer-id])
     ret))
 
@@ -390,7 +425,7 @@
           ;_ (println "Poll acks going to")
           fh (controlled-fragment-data-handler
               (fn [buffer offset length header]
-                (handle-poll-acks messenger barrier-ack dst-task-id src-peer-id buffer offset length header)))]
+                (handle-poll-acks messenger barrier-ack (:hash sub-info) dst-task-id src-peer-id buffer offset length header)))]
       (.controlledPoll ^Subscription subscription ^ControlledFragmentHandler fh fragment-limit-receiver)
       messenger)))
 
@@ -443,14 +478,18 @@
         channel (mc/aeron-channel bind-addr port)
         stream (stream-id job-id dst-task-id slot-id site)
         _ (println "Add subscription " channel stream conn)
-        subscription (.addSubscription conn channel stream)]
+        subscription (.addSubscription conn channel stream)
+        barrier (atom nil)
+        barrier-ack (atom nil)
+        recover-fragment-handler (RecoverFragmentHandler. src-peer-id dst-task-id barrier nil)]
     (assoc sub-info
            :subscription subscription
            :stream stream
            :conn conn
+           :recover-handler recover-fragment-handler
            :debug-id (java.util.UUID/randomUUID)
-           :barrier-ack (atom nil)
-           :barrier (atom nil))))
+           :barrier-ack barrier-ack
+           :barrier barrier)))
 
 (defn new-publication [{:keys [messenger-group] :as messenger}
                        {:keys [job-id src-peer-id dst-task-id slot-id site] :as pub-info}]
@@ -475,7 +514,6 @@
   (println "CLOSED SUB" sub-info "hash" (hash-sub sub-info))
   (.close ^Subscription (:subscription sub-info))
   (.close (:conn sub-info)))
-
 
 (defn equiv-sub [sub-info1 sub-info2]
   (= (select-keys sub-info1 [:src-peer-id :dst-task-id :slot-id]) 
@@ -647,6 +685,7 @@
     ;; Will require nippy to be able to write directly to unsafe buffers
     (let [payload ^bytes (messaging-compress (->Message id dst-task-id slot-id replica-version batch))
           buf ^UnsafeBuffer (UnsafeBuffer. payload)] 
+      (println "payload size" (alength payload))
       ;; shuffle publication order to ensure even coverage. FIXME: slow
       (loop [pubs (shuffle (get-in publications [dst-task-id slot-id]))]
         (if-let [pub-info (first pubs)]
@@ -675,17 +714,13 @@
             (println "WHEN SUB" (m/epoch messenger) (hash-sub sub)
                      (.channel (:subscription sub))
                      (.streamId (:subscription sub))
-
-                     (mapv (fn [i] [(.position i) (.correlationId i) (.sourceIdentity i)]) (.images (:subscription sub))) sub)
+                     (mapv (fn [i] [(.position i) :closed? (.isClosed i) (.correlationId i) (.sourceIdentity i)]) (.images (:subscription sub))) sub)
             (when-not @(:barrier sub)
               (poll-new-replica! messenger sub)
               (println "AFTER SUB" (m/epoch messenger) (hash-sub sub)
                        (.channel (:subscription sub))
                        (.streamId (:subscription sub))
-
-                       (mapv (fn [i] [(.position i) (.correlationId i) (.sourceIdentity i)]) (.images (:subscription sub))) sub)
-
-              )
+                       (mapv (fn [i] [(.position i) :closed? (.isClosed i) (.correlationId i) (.sourceIdentity i)]) (.images (:subscription sub))) sub))
             (recur (rest sbs)))))
       (if (m/all-barriers-seen? messenger)
         (let [_ (info "ALL SEEN SUBS " (vec subscriptions))
@@ -707,6 +742,9 @@
                                 :new-id (java.util.UUID/randomUUID)))
           publication ^Publication (:publication publication)
           buf ^UnsafeBuffer (UnsafeBuffer. ^bytes (messaging-compress barrier))]
+
+      (println "payload size" (alength (messaging-compress barrier)))
+
       (let [ret (.offer ^Publication publication buf 0 (.capacity buf))] 
         (swap! sent-barriers conj barrier)
         (println "Sending barrier" barrier "from " id)
