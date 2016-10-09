@@ -26,9 +26,6 @@
                       peer-site)))
          (filter task-peers))))
 
-(defn add-sub-hash [sub]
-  (assoc sub :hash (hash (select-keys sub [:src-peer-id :dst-task-id :slot-id :site]))))
-
 ;; Maybe set shared tickets somewhere?
 ;; Put with replica version, each one will run it, if any have set then don't reset for that replica version, job-id task-id
 (defn messenger-connections 
@@ -45,26 +42,9 @@
                                             (let [slot-id (if (state-task? replica job-id task-id)
                                                             (get-in task-slot-ids [job-id task-id peer-id])
                                                             all-slots)] 
-                                              #_(assert (not (= {:dst-task-id [#uuid "144910a6-3ccc-404d-89aa-543031d45e79" :inc], 
-                                                               :src-peer-id #uuid "2c16fb10-04a3-dc50-d673-7fb9e8ff8c01"
-                                                               ;#uuid "3c15d80c-63a6-c9a6-caf2-a77e5e1a221e"
-                                                               }
-                                                              (select-keys 
-                                                               {:src-peer-id id
-                                                                ;; Refactor dst-task-id to include job-id too
-                                                                :dst-task-id [job-id task-id]
-                                                                :slot-id slot-id
-                                                                :site (peer-sites peer-id)}                
-                                                               [:src-peer-id :dst-task-id])))
-                                               {:src-peer-id id
-                                               ;; Refactor dst-task-id to include job-id too
-                                               :dst-task-id [job-id task-id]
-                                               :slot-id slot-id
-                                               :site (peer-sites peer-id)}       
-                                                      )
-
                                               (assert slot-id)
-                                              {:src-peer-id id
+                                              {:type :message
+                                               :src-peer-id id
                                                ;; Refactor dst-task-id to include job-id too
                                                :dst-task-id [job-id task-id]
                                                :slot-id slot-id
@@ -76,7 +56,8 @@
                         (mapcat (fn [task-id] 
                                   (let [peers (receivable-peers task-id)]
                                     (map (fn [peer-id]
-                                           {:src-peer-id id
+                                           {:type :ack
+                                            :src-peer-id id
                                             :dst-task-id [job-id task-id]
                                             :slot-id (get-in task-slot-ids [job-id task-id peer-id])
                                             :site (peer-sites peer-id)})
@@ -91,7 +72,8 @@
                                                              (get-in task-slot-ids [job-id this-task-id id])
                                                              all-slots)] 
                                                (assert slot-id)
-                                               {:src-peer-id peer-id
+                                               {:type :message
+                                                :src-peer-id peer-id
                                                 :dst-task-id [job-id this-task-id]
                                                 :slot-id slot-id
                                                 :site (peer-sites id)
@@ -105,7 +87,8 @@
                         (mapcat (fn [task-id] 
                                   (let [peers (receivable-peers task-id)]
                                     (map (fn [peer-id]
-                                           {:src-peer-id peer-id
+                                           {:type :ack
+                                            :src-peer-id peer-id
                                             :dst-task-id [job-id this-task-id]
                                             :site (peer-sites id)
                                             :slot-id (get-in task-slot-ids [job-id this-task-id id])})
@@ -114,16 +97,17 @@
                    #{})
         coordinator-subs (if (= (:onyx/type task-map) :input) 
                            (if-let [coordinator-id (get-in replica [:coordinators job-id])]
-                             ;; Should we allocate a coordinator a unique uuid?
-                             #{{:src-peer-id [:coordinator coordinator-id]
+                             #{{:type :message
+                                ;; Should we allocate a coordinator a unique uuid?
+                                :src-peer-id [:coordinator coordinator-id]
                                 :dst-task-id [job-id this-task-id]
                                 :site (peer-sites id)
                                 :slot-id all-slots}}  
                              #{})
                            #{})]
     {:pubs (into ack-pubs egress-pubs)
-     :acker-subs (mapv add-sub-hash ack-subs)
-     :subs (mapv add-sub-hash (into coordinator-subs ingress-subs))}))
+     :acker-subs ack-subs
+     :subs (into coordinator-subs ingress-subs)}))
 
 (defn transition-messenger [messenger old-pub-subs new-pub-subs]
   (let [remove-pubs (difference (:pubs old-pub-subs) (:pubs new-pub-subs))
@@ -135,7 +119,6 @@
     (as-> messenger m
       (reduce m/add-publication m add-pubs)
       (reduce m/add-subscription m add-subs)
-      (reduce m/register-ticket m (:subs new-pub-subs))
       (reduce m/add-ack-subscription m add-acker-subs)
       (reduce m/remove-publication m remove-pubs)
       (reduce m/remove-subscription m remove-subs)
@@ -161,7 +144,7 @@
           _ (assert-consistent-messenger-state messenger old-pub-subs :pre)
           new-pub-subs (messenger-connections new-replica event)
           new-messenger (-> messenger
-                            (m/set-replica-version new-version)
-                            (transition-messenger old-pub-subs new-pub-subs))]
+                            (transition-messenger old-pub-subs new-pub-subs)
+                            (m/set-replica-version new-version))]
       (assert-consistent-messenger-state new-messenger new-pub-subs :post)
       new-messenger)))

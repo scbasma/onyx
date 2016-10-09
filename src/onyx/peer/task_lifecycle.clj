@@ -142,36 +142,13 @@
 
 (def tried-to-write (atom []))
 
-(deref tried-to-write)
-
-(defn offer-barriers 
+(defn do-offer-barriers 
   [{:keys [messenger context] :as state}]
   (println "Going to offer from" (:id (:event state)) "to publications" (:publications context))
    (loop [pubs (:publications context)]
      (if-not (empty? pubs)
        (let [pub (first pubs)
              ret (m/offer-barrier messenger pub (:barrier-opts context))]
-         #_(assert 
-          (not (= {:dst-task-id [#uuid "144910a6-3ccc-404d-89aa-543031d45e79" :inc], 
-                   :src-peer-id #uuid "2c16fb10-04a3-dc50-d673-7fb9e8ff8c01"
-                   ;#uuid "3c15d80c-63a6-c9a6-caf2-a77e5e1a221e"
-                   }
-                  (select-keys pub [:src-peer-id :dst-task-id])))
-                 
-                 )
-
-
-         (when ;and (= 120 (m/replica-version messenger))
-                    (= {:dst-task-id [#uuid "144910a6-3ccc-404d-89aa-543031d45e79" :inc], 
-                        :src-peer-id #uuid "2c16fb10-04a3-dc50-d673-7fb9e8ff8c01"
-                        ;#uuid "3c15d80c-63a6-c9a6-caf2-a77e5e1a221e"
-                        }
-                       (select-keys pub [:src-peer-id :dst-task-id]))
-           (swap! tried-to-write conj [pub ret])
-
-           )
-
-         ;(println "Emitting from " (:id (:event state)) ret)
          (case ret
            :success (recur (rest pubs))
            :fail (-> state
@@ -205,7 +182,7 @@
 (defn offer-barriers [{:keys [event messenger context] :as state}]
   (assert (#{:input :function} (:task-type event)))
   (if (:offer-barriers? context)
-    (let [new-state (offer-barriers state)]
+    (let [new-state (do-offer-barriers state)]
       (when-not (= :blocked (:state new-state))
         (write-state-checkpoint! new-state))
       new-state)     
@@ -380,23 +357,6 @@
           next-state)))))
 
 (defn poll-recover [{:keys [messenger event] :as state}]
-  #_(assert (or
-           (not= 120 (m/replica-version messenger))
-          
-           (not (some (fn [v]
-                  (= {:dst-task-id [#uuid "144910a6-3ccc-404d-89aa-543031d45e79" :inc], 
-                      :src-peer-id #uuid "2c16fb10-04a3-dc50-d673-7fb9e8ff8c01"
-                      ;#uuid "3c15d80c-63a6-c9a6-caf2-a77e5e1a221e"
-                      }
-                     (select-keys v [:src-peer-id :dst-task-id]))
-                  )
-                     (m/publications messenger)
-                     )))
-          
-          [(m/replica-version messenger)
-           (m/publications messenger)
-           ]
-          )
   (if-let [recover (m/poll-recover messenger)]
     (assoc state 
            :state :runnable
@@ -404,6 +364,7 @@
                         messenger
                         (m/next-epoch messenger))
            :context {:recover recover
+                     :offer-barriers? true
                      :barrier-opts {:recover recover}
                      :publications (m/publications messenger)})
     (assoc state :state :blocked)))
@@ -439,7 +400,6 @@
              ; "all barriers seen" (m/all-barriers-seen? (:messenger state))
              ; "barriers (5 shown)"
              ; (vec (take 5 (sort-by key (:barriers state))))
-
              )
 
     (when (#{:input :function :output} (:onyx/type task-map)) 

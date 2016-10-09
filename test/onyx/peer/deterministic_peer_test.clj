@@ -256,39 +256,21 @@
                                             (take (* n-cycles-per-group (count groups)) 
                                                   (cycle 
                                                    (concat ;; Iterate on the peers for two cycles
-                                                           (map 
-                                                            (fn [g] 
-                                                              [{:type :peer
-                                                                :command :task-iteration
-                                                                ;; Should be one for each known peer in the group, once it's
-                                                                ;; not one peer per group
-                                                                :group-id g
-                                                                :peer-owner-id [g :p0]
-                                                                ;; Two iterations between barriers to improve completion odds?
-                                                                :iterations 1}])
-                                                            groups)
-                                                           (map 
-                                                            (fn [g] 
-                                                              [{:type :peer
-                                                                :command :task-iteration
-                                                                ;; Should be one for each known peer in the group, once it's
-                                                                ;; not one peer per group
-                                                                :group-id g
-                                                                :peer-owner-id [g :p0]
-                                                                ;; Two iterations between barriers to improve completion odds?
-                                                                :iterations 1}])
-                                                            groups)
-                                                           (map 
-                                                            (fn [g] 
-                                                              [{:type :peer
-                                                                :command :task-iteration
-                                                                ;; Should be one for each known peer in the group, once it's
-                                                                ;; not one peer per group
-                                                                :group-id g
-                                                                :peer-owner-id [g :p0]
-                                                                ;; Two iterations between barriers to improve completion odds?
-                                                                :iterations 1}])
-                                                            groups)
+                                                           (apply concat
+                                                                  ;; 5 full task iterations
+                                                                  (repeat 5 
+                                                                          (map 
+                                                                           (fn [g] 
+                                                                             [{:type :peer
+                                                                               :command :task-iteration
+                                                                               ;; Should be one for each known peer in the group, once it's
+                                                                               ;; not one peer per group
+                                                                               :group-id g
+                                                                               :peer-owner-id [g :p0]
+                                                                               ;; Two iterations between barriers to improve completion odds?
+                                                                               :iterations 1}])
+                                                                           groups)))
+                                                           ;; Then a periodic barrier and a couple offer barriers
                                                            (map 
                                                             (fn [g] 
                                                               ;; Emit a barrier on a coordinator
@@ -304,7 +286,26 @@
                                                                 :group-id g
                                                                 :peer-owner-id [g :p0]
                                                                 :iterations 1}])
-                                                            groups)))))
+                                                            groups)
+                                                           (map 
+                                                            (fn [g] 
+                                                              ;; Emit a barrier on a coordinator
+                                                              [{:type :peer
+                                                                :command :offer-barriers
+                                                                :group-id g
+                                                                :peer-owner-id [g :p0]
+                                                                :iterations 1}])
+                                                            groups)
+                                                           (map 
+                                                            (fn [g] 
+                                                              ;; Emit a barrier on a coordinator
+                                                              [{:type :peer
+                                                                :command :offer-barriers
+                                                                :group-id g
+                                                                :peer-owner-id [g :p0]
+                                                                :iterations 1}])
+                                                            groups)
+                                                           ))))
                   ;; Allows emitting exhaust-inputs and thus job completion
                   drain-commands [{:type :drain-commands}]]
               (concat finish-iterations drain-commands)))
@@ -363,10 +364,8 @@
 
 (defn run-test [{:keys [phases uuid-seed]}]
 
-
-    ;; FIXME REMOVE
-           (onyx.messaging.aeron/reset-tracked-messages!)
-           (reset! onyx.messaging.aeron/sent-barriers [])
+  ;; FIXME REMOVE
+  ;(onyx.messaging.aeron/reset-tracked-messages!)
 
   (let [_ (reset! state-atom {})
         _ (reset! key-slot-tracker {})
@@ -395,7 +394,7 @@
                    [{:type :drain-commands}]
                    ;; Complete the job
                    ;; FIXME: not sure why so many iterations are required when using grouping
-                   (job-completion-cmds unique-groups jobs 8000)
+                   (job-completion-cmds unique-groups jobs 2000)
                    [{:type :drain-commands}])
         model (g/model-commands all-cmds)
         messenger-type :aeron
@@ -453,7 +452,7 @@
             (gen/tuple gen/uuid n-input-peers-gen)))
 
 (defspec deterministic-abs-test {;:seed X 
-                                 :num-tests (times 100)}
+                                 :num-tests (times 1000)}
   (for-all [uuid-seed (gen/no-shrink gen/int)
             n-jobs (gen/return 1) ;(gen/resize 4 gen/s-pos-int) 
             ;; Number of peers on each input task

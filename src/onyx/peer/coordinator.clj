@@ -67,16 +67,6 @@
       (reduce m/add-publication m add-pubs)
       (reduce m/remove-publication m remove-pubs))))
 
-(def send-failures (atom []))
-
-(filter #(and 
-          (= (:site (nth % 2))
-             {:address "localhost", :port 40004})
-                 
-          (= [#uuid "e2a73cc3-ac7a-4904-b325-78a90322389c" :in2]
-             (:dst-task-id (nth % 2)))
-                 (= (last %) 1) #_(= (first %) :fail)) (deref send-failures))
-
 (defn offer-barriers 
   [{:keys [messenger rem-barriers barrier-opts offering?] :as state}]
   (assert messenger)
@@ -85,7 +75,6 @@
       (if-not (empty? pubs)
         (let [pub (first pubs)
               ret (m/offer-barrier messenger pub barrier-opts)]
-          (swap! send-failures conj [ret (m/replica-version messenger) pub (m/epoch messenger)])
           (case ret
             :success (recur (rest pubs))
             :fail (assoc state :rem-barriers pubs)))
@@ -127,7 +116,6 @@
      (some #{job-id} (:jobs new-replica))
      true))
   (assert (= peer-id (get-in new-replica [:coordinators job-id])) [peer-id (get-in new-replica [:coordinators job-id])])
-  (assert messenger)
   (case action-type 
     :offer-barriers (offer-barriers state)
     :shutdown (assoc state :messenger (component/stop messenger))

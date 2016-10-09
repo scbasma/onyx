@@ -347,7 +347,7 @@
       groups)))
 
 (defn apply-orchestration-command [groups peer-config {:keys [command group-id]}]
-  (println "Applying " command group-id)
+  (println "Applying " command group-id "peerconfig " peer-config)
   (case command
     :remove-peer-group
     (do (when-let [group (get groups group-id)]
@@ -499,6 +499,7 @@
                                :onyx.peer/join-failure-back-off 0
                                :onyx.peer/state-log-impl :mocked-log
                                :onyx.messaging.aeron/embedded-driver? false
+                               ;:onyx.messaging.aeron/embedded-media-driver-threading :dedicated
                                :onyx/tenancy-id onyx-id
                                :onyx.messaging/impl messenger-type
                                :onyx.log/config {:level :error})
@@ -506,6 +507,7 @@
             embedded-media-driver (component/start (aeron/->EmbeddedMediaDriver 
                                                     (assoc peer-config 
                                                            :onyx.messaging.aeron/embedded-driver? (= messenger-type :aeron))))]
+        (println "Starting run")
         (try
          (let [final-groups (reduce #(apply-event peer-config %1 %2) groups events)
                ;_ (println "Final " @zookeeper-log)
@@ -524,6 +526,7 @@
            ;(println "final log " @zookeeper-log)
             {:replica final-replica 
              :groups final-groups})
+
          (catch Throwable t
            {:exception (.getCause t)
             :groups (:groups (ex-data t))})

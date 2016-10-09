@@ -137,8 +137,7 @@
     ;; Success!
     task-slot)
 
-  (register-ticket [messenger sub-info]
-    messenger)
+  (register-ticket [messenger sub-info] messenger)
 
   (offer-barrier [messenger publication]
     (onyx.messaging.messenger/offer-barrier messenger publication {}))
