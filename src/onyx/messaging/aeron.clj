@@ -227,7 +227,6 @@
     (set! replica-version new-replica-version)
     this)
   (set-epoch! [this new-epoch]
-    (println "SETTING EPOCH" new-epoch)
     (set! epoch new-epoch)
     this)
   (init [this new-ticket]
@@ -238,7 +237,7 @@
     (persistent! batch))
   ControlledFragmentHandler
   (onFragment [this buffer offset length header]
-    (println "ON FRAGMENT " ticket)
+    ;(println "ON FRAGMENT " ticket)
     (let [ba (byte-array length)
           _ (.getBytes ^UnsafeBuffer buffer offset ba)
           message (messaging-decompress ba)
@@ -426,7 +425,7 @@
   (let [error-handler (reify ErrorHandler
                         (onError [this x] 
                           (println "Aeron messaging subscriber error" x)
-                          (System/exit 1)
+                          ;(System/exit 1)
                           ;; FIXME: Reboot peer
                           (taoensso.timbre/warn x "Aeron messaging subscriber error")))
         ctx (-> (Aeron$Context.)
@@ -467,7 +466,7 @@
   (let [channel (mc/aeron-channel (:address site) (:port site))
         error-handler (reify ErrorHandler
                         (onError [this x] 
-                          (System/exit 1)
+                          ;(System/exit 1)
                           ;; FIXME: Reboot peer
                           (println "Aeron messaging publication error" x)
                           (taoensso.timbre/warn "Aeron messaging publication error:" x)))
@@ -606,7 +605,8 @@
     messenger)
 
   (remove-ack-subscription [messenger sub-info]
-    (set! ack-subscriptions (remove-from-subscriptions ack-subscriptions sub-info)))
+    (set! ack-subscriptions (remove-from-subscriptions ack-subscriptions sub-info))
+    messenger)
 
   (add-publication [messenger pub-info]
     (set! publications 
@@ -626,7 +626,7 @@
                                   pub-info))
     messenger)
 
-  (set-replica-version [messenger rv]
+  (set-replica-version! [messenger rv]
     (set! read-index 0)
     (run! (fn [sub] (reset! (:barrier-ack sub) nil)) ack-subscriptions)
     (run! (fn [sub] (reset! (:barrier sub) nil)) subscriptions)
@@ -638,7 +638,7 @@
             (set-replica-version! (:ack-handler sub) rv)) 
           ack-subscriptions)
     (set! replica-version rv)
-    (m/set-epoch messenger 0)
+    (m/set-epoch! messenger 0)
     (reduce m/register-ticket messenger subscriptions))
 
   (replica-version [messenger]
@@ -647,7 +647,7 @@
   (epoch [messenger]
     epoch)
 
-  (set-epoch [messenger e]
+  (set-epoch! [messenger e]
     (run! (fn [sub]
             (set-epoch! (:segments-handler sub) e)
             (set-epoch! (:recover-handler sub) e)) 
@@ -655,8 +655,8 @@
     (set! epoch e)
     messenger)
 
-  (next-epoch [messenger]
-    (m/set-epoch messenger (inc epoch)))
+  (next-epoch! [messenger]
+    (m/set-epoch! messenger (inc epoch)))
 
   (poll-acks [messenger]
     (reduce poll-acks! messenger ack-subscriptions))

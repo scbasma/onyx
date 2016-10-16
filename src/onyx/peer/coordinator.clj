@@ -89,9 +89,9 @@
   [{:keys [log job-id peer-id messenger prev-replica] :as state} new-replica]
   (let [new-messenger (-> messenger 
                           (transition-messenger prev-replica new-replica job-id peer-id)
-                          (m/set-replica-version (get-in new-replica [:allocation-version job-id])))
+                          (m/set-replica-version! (get-in new-replica [:allocation-version job-id])))
         checkpoint-version (max-completed-checkpoints log new-replica job-id)
-        new-messenger (m/next-epoch new-messenger)]
+        new-messenger (m/next-epoch! new-messenger)]
     (assoc state 
            :offering? true
            :barrier-opts {:recover checkpoint-version}
@@ -103,7 +103,7 @@
   (if offering?
     ;; No op because hasn't finished emitting last barrier, wait again
     state
-    (let [messenger (m/next-epoch messenger)] 
+    (let [messenger (m/next-epoch! messenger)] 
       (assoc state 
              :offering? true
              :barrier-opts {}
@@ -166,7 +166,7 @@
   (-> messenger 
       component/start
       ;; Probably bad to have to default to -1, though it will get updated immediately
-      (m/set-replica-version (get-in replica [:allocation-version job-id] -1))))
+      (m/set-replica-version! (get-in replica [:allocation-version job-id] -1))))
 
 (defn stop-coordinator! [{:keys [shutdown-ch allocation-ch]}]
   (when shutdown-ch

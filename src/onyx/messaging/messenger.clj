@@ -45,10 +45,10 @@
   (offer-barrier-ack [messenger publication])
   (unblock-subscriptions! [messenger])
   (replica-version [messenger])
-  (set-replica-version [messenger replica-version])
+  (set-replica-version! [messenger replica-version])
+  (next-epoch! [messenger])
+  (set-epoch! [messenger epoch])
   (epoch [messenger])
-  (next-epoch [messenger])
-  (set-epoch [messenger epoch])
   (all-acks-seen? [messenger])
   (all-barriers-seen? [messenger])
 

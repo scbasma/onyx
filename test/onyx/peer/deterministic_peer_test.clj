@@ -66,6 +66,7 @@
 (def key-slot-tracker (atom {}))
 
 (defn update-state-atom! [{:keys [messenger] :as event} window trigger state-event extent-state]
+  (assert messenger)
   ;; FIXME, needs to re-offer / pause state
   ; (when-not (= :job-completed (:event-type state-event)) 
   ;   (let [{:keys [job-id id egress-tasks]} event 

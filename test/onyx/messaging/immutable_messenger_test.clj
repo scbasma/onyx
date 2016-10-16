@@ -37,23 +37,23 @@
         m (-> messenger
 
               (switch-peer :p1)
-              (m/set-replica-version 1)
+              (m/set-replica-version! 1)
               (m/add-publication t1-queue-p1)
               (m/add-subscription t2-ack-queue)
 
               (switch-peer :p2)
-              (m/set-replica-version 1)
+              (m/set-replica-version! 1)
               (m/add-publication t1-queue-p2)
               (m/add-subscription t2-ack-queue)
 
               (switch-peer :p3)
-              (m/set-replica-version 1)
+              (m/set-replica-version! 1)
               (m/add-subscription t1-queue-p1)
               (m/add-subscription t1-queue-p2)
               (m/add-publication t2-ack-queue)
 
               (switch-peer :p4)
-              (m/set-replica-version 1)
+              (m/set-replica-version! 1)
               (m/add-subscription t1-queue-p1)
               (m/add-subscription t1-queue-p2)
               (m/add-publication t3-ack-queue)

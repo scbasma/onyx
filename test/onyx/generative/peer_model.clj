@@ -12,6 +12,7 @@
             [onyx.log.failure-detector]
             [onyx.log.commands.common :as common]
             [onyx.mocked.failure-detector]
+            [onyx.protocol.task-state :refer :all]
             [onyx.mocked.log]
             [onyx.peer.coordinator :as coord]
             [onyx.log.replica]
@@ -289,19 +290,18 @@
 
 (defn assert-correct-replicas [written new-state]
   (assert (or (empty? written) 
-              (= #{(m/replica-version (:messenger new-state))}
+              (= #{(m/replica-version (get-messenger new-state))}
                  (set (map :replica written))))
           "something was written but replica versions weren't right"))
 
 (defn conj-written-segments [batches command prev-state new-state prev-replica-version]
   (let [written (if (= command :task-iteration) 
-                  (seq (:null/not-written (:event new-state))))]  
+                  (seq (:null/not-written (get-event new-state))))]  
     (assert-correct-replicas written new-state)
 
     (cond-> (vec batches)
 
-      (not= prev-replica-version
-            (m/replica-version (:messenger (tl/get-state new-state))))
+      (not= prev-replica-version (m/replica-version (get-messenger new-state)))
       (conj [:reset-messenger])
 
       written 
@@ -320,7 +320,7 @@
         (tl/iteration prev-state replica)
 
         (#{:periodic-barrier :offer-barriers} command)
-        (tl/set-state! prev-state (update (tl/get-state prev-state) :coordinator next-coordinator-state command))))
+        (set-coordinator! prev-state (next-coordinator-state (get-coordinator prev-state) command))))
 
 (defn apply-peer-commands [groups {:keys [command group-id peer-owner-id]}]
   (let [group (get groups group-id)
@@ -335,7 +335,7 @@
                 prev-state (or (get-in @task-component [:task-lifecycle :prev-state])
                                init-state)
                 ;; capture replica version here as it is mutable inside the messenger
-                prev-replica-version (m/replica-version (:messenger (tl/get-state prev-state)))
+                prev-replica-version (m/replica-version (get-messenger prev-state))
                 new-state (next-state prev-state command current-replica)]
             ;; Assoc into task state to provide a way to shutdown state from task component
             (when-let [state-container (:holder (:task-lifecycle @task-component))]

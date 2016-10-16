@@ -255,12 +255,12 @@
                                   (select-keys p [:src-peer-id :dst-task-id :slot-id])))
                           pp))))
 
-  (set-replica-version [messenger replica-version]
+  (set-replica-version! [messenger replica-version]
     (-> messenger 
         (assoc-in [:replica-version id] replica-version)
         (update-in [:subscriptions id] 
                    (fn [ss] (mapv #(assoc % :barrier-ack nil :barrier nil) ss)))
-        (m/set-epoch 0)))
+        (m/set-epoch! 0)))
 
   (replica-version [messenger]
     (get-in messenger [:replica-version id]))
@@ -268,11 +268,11 @@
   (epoch [messenger]
     (get epoch id))
 
-  (set-epoch 
+  (set-epoch! 
     [messenger epoch]
     (assoc-in messenger [:epoch id] epoch))
 
-  (next-epoch
+  (next-epoch!
     [messenger]
     (update-in messenger [:epoch id] inc))
 

@@ -97,9 +97,9 @@
     (update-messenger-atom! messenger m/remove-publication pub)
     messenger)
 
-  (set-replica-version
+  (set-replica-version!
     [messenger replica-version]
-    (update-messenger-atom! messenger m/set-replica-version replica-version)
+    (update-messenger-atom! messenger m/set-replica-version! replica-version)
     messenger)
 
   (replica-version
@@ -110,13 +110,13 @@
     [messenger]
     (m/epoch (switch-peer @immutable-messenger id)))
 
-  (set-epoch [messenger epoch]
-    (update-messenger-atom! messenger m/set-epoch epoch)
+  (set-epoch! [messenger epoch]
+    (update-messenger-atom! messenger m/set-epoch! epoch)
     messenger)
 
-  (next-epoch
+  (next-epoch!
     [messenger]
-    (update-messenger-atom! messenger m/next-epoch)
+    (update-messenger-atom! messenger m/next-epoch!)
     messenger)
 
   (poll-acks [messenger]

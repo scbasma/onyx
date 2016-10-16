@@ -147,6 +147,6 @@
           new-pub-subs (messenger-connections new-replica event)
           new-messenger (-> messenger
                             (transition-messenger old-pub-subs new-pub-subs)
-                            (m/set-replica-version new-version))]
+                            (m/set-replica-version! new-version))]
       (assert-consistent-messenger-state new-messenger new-pub-subs :post)
       new-messenger)))
