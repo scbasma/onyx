@@ -116,6 +116,8 @@
         add-subs (difference (:subs new-pub-subs) (:subs old-pub-subs))
         remove-acker-subs (difference (:acker-subs old-pub-subs) (:acker-subs new-pub-subs))
         add-acker-subs (difference (:acker-subs new-pub-subs) (:acker-subs old-pub-subs))]
+    ;; Maybe initialise the subs and pubs with the right epoch messenger id?
+    ;; That way you don't get -1 type things
     (as-> messenger m
       (reduce m/add-publication m add-pubs)
       (reduce m/add-subscription m add-subs)

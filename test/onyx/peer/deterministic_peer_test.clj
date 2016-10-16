@@ -30,7 +30,6 @@
             [clojure.test.check.properties :as prop]
             [com.gfredericks.test.chuck :refer [times]]
             [com.gfredericks.test.chuck.clojure-test :refer [checking for-all]]
-
             [taoensso.timbre :refer [fatal info debug] :as timbre]
             [onyx.api])
   (:import [java.text SimpleDateFormat]))
@@ -362,11 +361,10 @@
         [job-id job-state] (first state)]
     (job-state-properties expected-state job-id job-state)))
 
-(defn run-test [{:keys [phases uuid-seed]}]
-
+(defn run-test [{:keys [phases] :as generated}]
+         (assert (:media-driver-type generated) (keys generated))
   ;; FIXME REMOVE
   ;(onyx.messaging.aeron/reset-tracked-messages!)
-
   (let [_ (reset! state-atom {})
         _ (reset! key-slot-tracker {})
         all-gen-cmds (apply concat phases)
@@ -394,12 +392,12 @@
                    [{:type :drain-commands}]
                    ;; Complete the job
                    ;; FIXME: not sure why so many iterations are required when using grouping
-                   (job-completion-cmds unique-groups jobs 2000)
+                   (job-completion-cmds unique-groups jobs 1000)
                    [{:type :drain-commands}])
         model (g/model-commands all-cmds)
-        messenger-type :aeron
         ;_ (println "Start run" (count gen-cmds))
-        {:keys [replica groups exception]} (g/play-events all-cmds uuid-seed messenger-type)
+        _ (assert (:media-driver-type generated))
+        {:keys [replica groups exception]} (g/play-events (assoc generated :events all-cmds))
         _ (when exception (throw exception))
         n-peers (count (:peers replica))
         _ (println "final peers" n-peers)
@@ -424,9 +422,6 @@
                             (map (fn [v] 
                                    (update v :path (comp vec butlast))))
                             (group-by :n))]
-    
-
-
     (prop-is (>= n-peers n-required-peers) "not enough peers")
     (prop-is (= (count (:groups model)) (count (:groups replica))) ["groups" (:groups model) (:groups replica)])
     (prop-is (= (count (apply concat (vals (:peers model)))) 
@@ -454,6 +449,7 @@
 (defspec deterministic-abs-test {;:seed X 
                                  :num-tests (times 1000)}
   (for-all [uuid-seed (gen/no-shrink gen/int)
+            media-driver-type (gen/elements [:shared #_:shared-network #_:dedicated])
             n-jobs (gen/return 1) ;(gen/resize 4 gen/s-pos-int) 
             ;; Number of peers on each input task
             initial-submit? (gen/no-shrink (gen/elements [1 0]))
@@ -481,7 +477,17 @@
                                  10000))))]
            (println "Phases" (map count phases))
            (let [generated {:phases phases 
+                            :messenger-type :aeron
+                            :media-driver-type media-driver-type
                             :uuid-seed uuid-seed}]
+
+             ;; Write all the time
+             (let [date-str (.format (SimpleDateFormat. "yyyy_dd_MM_HH-mm-ss") (java.util.Date.))
+                   filename (str "target/test_check_output/testcase." date-str "-tttt.edn")] 
+               (println "Run written to " filename)
+               (.mkdir (java.io.File. "target/test_check_output"))
+               (spit filename (pr-str generated)))
+
              (try (run-test generated)
                   (Thread/sleep 5000)
                   (catch Throwable t

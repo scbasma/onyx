@@ -247,21 +247,23 @@
 (defn drain-commands 
   "Repeatedly plays a stanza of commands that will ensure all operations are complete"
   [groups]
-  (let [commands (mapcat 
-                  (fn [g] 
-                    [{:type :group
-                      :command :play-group-commands
-                      :group-id g
-                      :iterations 10}
-                     {:type :group 
-                      :command :write-outbox-entries
-                      :group-id g
-                      :iterations 10}
-                     {:type :group
-                      :command :apply-log-entries
-                      :group-id g
-                      :iterations 10}])
-                  (keys groups))
+  (let [commands (apply concat
+                        (repeat 5
+                                (mapcat 
+                                 (fn [g] 
+                                   [{:type :group
+                                     :command :play-group-commands
+                                     :group-id g
+                                     :iterations 1}
+                                    {:type :group 
+                                     :command :write-outbox-entries
+                                     :group-id g
+                                     :iterations 1}
+                                    {:type :group
+                                     :command :apply-log-entries
+                                     :group-id g
+                                     :iterations 1}])
+                                 (keys groups))))
         new-groups (reduce apply-group-command groups commands)]
     (if (= groups new-groups)
       ;; Drained 
@@ -299,7 +301,7 @@
     (cond-> (vec batches)
 
       (not= prev-replica-version
-            (m/replica-version (:messenger new-state)))
+            (m/replica-version (:messenger (tl/get-state new-state))))
       (conj [:reset-messenger])
 
       written 
@@ -315,10 +317,10 @@
 
 (defn next-state [prev-state command replica]
   (cond (= command :task-iteration) 
-        (tl/next-state prev-state replica)
+        (tl/iteration prev-state replica)
 
         (#{:periodic-barrier :offer-barriers} command)
-        (update prev-state :coordinator next-coordinator-state command)))
+        (tl/set-state! prev-state (update (tl/get-state prev-state) :coordinator next-coordinator-state command))))
 
 (defn apply-peer-commands [groups {:keys [command group-id peer-owner-id]}]
   (let [group (get groups group-id)
@@ -333,7 +335,7 @@
                 prev-state (or (get-in @task-component [:task-lifecycle :prev-state])
                                init-state)
                 ;; capture replica version here as it is mutable inside the messenger
-                prev-replica-version (m/replica-version (:messenger prev-state))
+                prev-replica-version (m/replica-version (:messenger (tl/get-state prev-state)))
                 new-state (next-state prev-state command current-replica)]
             ;; Assoc into task state to provide a way to shutdown state from task component
             (when-let [state-container (:holder (:task-lifecycle @task-component))]
@@ -428,7 +430,7 @@
   (stop [component]
     component))
 
-(defn play-events [events uuid-seed messenger-type]
+(defn play-events [{:keys [events uuid-seed messenger-type media-driver-type] :as generated}]
   (let [zookeeper-log (atom nil)
         zookeeper-store (atom nil)
         checkpoints (atom nil)
@@ -499,7 +501,7 @@
                                :onyx.peer/join-failure-back-off 0
                                :onyx.peer/state-log-impl :mocked-log
                                :onyx.messaging.aeron/embedded-driver? false
-                               ;:onyx.messaging.aeron/embedded-media-driver-threading :dedicated
+                               :onyx.messaging.aeron/embedded-media-driver-threading media-driver-type
                                :onyx/tenancy-id onyx-id
                                :onyx.messaging/impl messenger-type
                                :onyx.log/config {:level :error})

@@ -75,9 +75,9 @@
       (if-not (empty? pubs)
         (let [pub (first pubs)
               ret (m/offer-barrier messenger pub barrier-opts)]
-          (case ret
-            :success (recur (rest pubs))
-            :fail (assoc state :rem-barriers pubs)))
+          (if (pos? ret)
+            (recur (rest pubs))
+            (assoc state :rem-barriers pubs)))
         (-> state 
             (update :messenger m/unblock-subscriptions!)
             (assoc :checkpoint-version nil)

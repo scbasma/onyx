@@ -12,6 +12,7 @@
            [java.util.function Consumer]
            [java.util.concurrent TimeUnit]))
 
+;comment
 (defn delete-aeron-directory-safe [^MediaDriver$Context media-driver-context]
   (try (.deleteAeronDirectory media-driver-context)
        (catch java.nio.file.NoSuchFileException nsfe
@@ -110,27 +111,31 @@
 (defn try-run []
   (let [media-driver (component/start (->EmbeddedMediaDriver))]
     (try
-     (dotimes [stream-id 1] 
-       (let [pubs [(new-publication stream-id)]
-             subs [(new-subscription stream-id)
-                   (new-subscription stream-id)
-                   #_(new-subscription stream-id)]]
-         ;(Thread/sleep 2000)
+     (dotimes [stream-id 10000] 
+       (let [n-subscribers (rand-int 15)
+             n-publishers 15
+             subs (mapv (fn [i] (new-subscription stream-id))
+                        (range (inc n-subscribers)))
+             pubs (mapv (fn [i] (new-publication stream-id))
+                        (range n-publishers))]
+         (Thread/sleep 2000)
          (try
           (dotimes [i 10000]
             (when true ;(zero? (rand-int 10)) 
-              (offer-message! (first pubs) {:id i :rand-str (apply str (repeatedly 10000 #(rand-int 10000)))}))
+              (offer-message! (first pubs) {:id i :rand-str (apply str (repeatedly 200 #(rand-int 10000)))}))
             ;; sometimes poll
             (run! (fn [sub] 
                     (when true ;(zero? (rand-int 5)) 
                       (poll! sub))) 
                   subs))
 
-          (dotimes [i 10000000]
+          (dotimes [i 100000]
             (run! (fn [sub] 
                     (when (zero? (rand-int 50)) 
                       (poll! sub))) 
                   subs))
+
+          (Thread/sleep 500)
 
           ;; Try to flush the rest
           (dotimes [i 10000000]
@@ -141,20 +146,17 @@
           ;; Try to flush the rest again
           ; (dotimes [i 10000000]
           ;   (run! poll! subs))
+          (let [sent-missing (mapv (fn [sub] (sort (vec (clojure.set/difference (set @(:sent (first pubs)))
+                                                                                (set (map first @(:read sub)))))))
 
-          (println 
-           "Sent missing sub 1"
-           (sort (vec (clojure.set/difference (set @(:sent (first pubs)))
-                                              (set (map first @(:read (first subs)))))))
-           "\n"
-           "Sent missing sub 2"
-           (sort (vec (clojure.set/difference (set @(:sent (first pubs)))
-                                              (set (map first @(:read (second subs)))))))
-           "\n"
-           "EQUAL?" 
-           (= 1 (count (set (map (fn [sub]
-                                   (map first @(:read sub)))
-                                 subs)))))
+                                   subs)]
+            (assert (empty? (reduce into [] sent-missing))
+                    (mapv (fn [sub positions sent-missing]
+                            [:positions positions :sent-missing sent-missing :read @(:read sub)])
+                          subs
+                          (mapv (fn [sub] (map (fn [i] (.position i)) (.images (:subscription sub))))
+                                subs)     
+                          sent-missing)))
           (finally 
            (run! close-pub! pubs)
            (run! close-sub! subs)))))

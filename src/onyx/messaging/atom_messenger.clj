@@ -145,7 +145,7 @@
   (offer-barrier
     [messenger publication barrier-opts]
     (update-messenger-atom! messenger m/offer-barrier publication barrier-opts)
-    :success)
+    1)
   
   (unblock-subscriptions! 
     [messenger]
@@ -165,7 +165,7 @@
   (offer-barrier-ack
     [messenger publication]
     (update-messenger-atom! messenger m/offer-barrier-ack publication)
-    :success))
+    1))
 
 (defmethod m/build-messenger :atom [peer-config messenger-group id]
   (map->AtomMessenger {:id id 

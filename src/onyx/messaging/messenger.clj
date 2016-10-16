@@ -35,6 +35,8 @@
   (ack-subscriptions [messenger])
 
   (register-ticket [messenger sub-info])
+  (get-ticket [messenger sub-info])
+
   (poll [messenger])
   (poll-recover [messenger])
 
