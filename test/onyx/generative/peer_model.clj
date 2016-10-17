@@ -246,8 +246,6 @@
                         state)))))
     groups))
 
-(def vv (atom 0))
-
 (defn drain-commands 
   "Repeatedly plays a stanza of commands that will ensure all operations are complete"
   [groups]
