@@ -21,7 +21,7 @@
             [onyx.messaging.messenger-state :as ms]
             [onyx.log.replica]
             [onyx.extensions :as extensions]
-            [onyx.types :refer [->Results ->MonitorEvent map->Event dec-count! inc-count! map->EventState ->EventState]]
+            [onyx.types :refer [->Results ->MonitorEvent map->Event]]
             [onyx.peer.window-state :as ws]
             [onyx.peer.transform :refer [apply-fn]]
             [onyx.plugin.onyx-input :as oi]
@@ -311,17 +311,18 @@
   (let [event (get-event state)] 
     (if (:windowed-task? event)
       (let [{:keys [log-prefix task-map windows triggers]} event
-            stored (recover-stored-checkpoint event :state recover)]
+            stored (recover-stored-checkpoint event :state recover)
+            recovered-windows (->> windows
+                                   (mapv (fn [window] (wc/resolve-window-state window triggers task-map)))
+                                   (mapv (fn [stored ws]
+                                           (if stored
+                                             (let [recovered (ws/recover-state ws stored)] 
+                                               (info "Recovered state" stored (:id event))
+                                               recovered) 
+                                             ws))
+                                         (or stored (repeat nil))))]
         (-> state 
-            (set-windows-state! (->> windows
-                                     (mapv (fn [window] (wc/resolve-window-state window triggers task-map)))
-                                     (mapv (fn [stored ws]
-                                             (if stored
-                                               (let [recovered (ws/recover-state ws stored)] 
-                                                 (info "Recovered state" stored (:id event))
-                                                 recovered) 
-                                               ws))
-                                           (or stored (repeat nil)))))
+            (set-windows-state! recovered-windows)
             (ws/assign-windows :recovered))
         ;; Log playback
         ;(update :windows-state
@@ -421,12 +422,12 @@
         old-replica (get-replica state-machine)
         old-version (get-in old-replica [:allocation-version job-id])
         new-version (get-in replica [:allocation-version job-id])]
+    (println "ITERATION")
     (if (task-alive? event)
       (if-not (= old-version new-version)
         (next-replica! state-machine replica)
         (loop [sm state-machine]
           ;(print-state state)
-          ;(println "Trying " (:task (:event state)) (:lifecycle state)  (:state state))
           (let [next-sm (exec sm)]
             (if (or (not (advanced? sm)) (initial-state? sm))
               next-sm
@@ -437,17 +438,13 @@
   "The main task run loop, read batch, ack messages, etc."
   [state-machine ex-f]
   (try
-    (assert (:event state-machine))
-    (let [{:keys [task-kill-ch kill-ch task-information replica-atom opts state]} (:event state-machine)] 
+    (let [{:keys [task-kill-ch kill-ch task-information replica-atom opts state]} (get-event state-machine)] 
       (loop [sm state-machine 
              replica-val @replica-atom]
         ;; TODO add here :offer-barriers, emit-ack-barriers?
         ;(println "Iteration " (:state prev-state))
         (info "Task Dropping back in " (:task-type (get-event sm)))
         (let [next-sm (iteration sm replica-val)]
-          (assert (empty? (.__extmap (get-event next-sm))) 
-                  (str "Ext-map for state record should be empty at start. Contains: " 
-                       (keys (.__extmap (get-event next-sm)))))
           (if-not (killed? next-sm) 
             (recur next-sm @replica-atom)
             next-sm))))
@@ -652,7 +649,7 @@
   (exec [this]
     (set! advanced false)
     (let [task-fn (aget state-fns idx)]
-      ;(println "Calling task-fn" task-fn (:task-type event))
+      (println "Calling task-fn" task-fn (:task-type event))
       (task-fn this)))
   (advance [this]
     (let [new-idx ^int (unchecked-add-int idx 1)]
@@ -673,21 +670,8 @@
                                              idx)))
                             (remove nil?)
                             (first))]
-    (->TaskStateMachine (int processing-idx)
-                        (alength arr)
-                        arr
-                        (int 0)
-                        false
-                        replica
-                        messenger
-                        coordinator
-                        pipeline
-                        event
-                        event
-                        nil
-                        (c/event->windows-states event)
-                        nil
-                        nil)))
+    (->TaskStateMachine (int processing-idx) (alength arr) arr (int 0) false replica messenger coordinator 
+                        pipeline event event nil (c/event->windows-states event) nil nil)))
 
 (defn backoff-until-task-start! [{:keys [kill-ch task-kill-ch opts] :as event}]
   (while (and (first (alts!! [kill-ch task-kill-ch] :default true))
@@ -773,20 +757,7 @@
                            messenger
                            coordinator
                            (build-pipeline task-map event)
-                           event
-
-                           #_(map->EventState 
-                            {:lifecycle :poll-recover
-                             :state :runnable
-                             :replica (onyx.log.replica/starting-replica opts)
-                             :messenger messenger
-                             :coordinator coordinator
-                             :pipeline (build-pipeline task-map event)
-                             :barriers {}
-                             :exhausted? false ;; convert to a state
-                             :windows-state (c/event->windows-states event)
-                             :init-event event
-                             :event event}))]
+                           event)]
        ;; TODO: we may need some kind of a signal ready to assure that 
        ;; subscribers do not blow past messages in aeron
        ;(>!! outbox-ch (entry/create-log-entry :signal-ready {:id id}))

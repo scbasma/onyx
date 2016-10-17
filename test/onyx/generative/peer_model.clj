@@ -215,6 +215,7 @@
                 (range n))))
 
 (defn apply-group-command [groups {:keys [command group-id] :as event}]
+  ;(println "Applying group command" event)
   ;; Default case is that this will be a group command
   (if-let [group (get groups group-id)]
     (assoc groups 
@@ -245,37 +246,44 @@
                         state)))))
     groups))
 
+(def vv (atom 0))
+
 (defn drain-commands 
   "Repeatedly plays a stanza of commands that will ensure all operations are complete"
   [groups]
-  (let [commands (apply concat
-                        (repeat 5
-                                (mapcat 
-                                 (fn [g] 
-                                   [{:type :group
-                                     :command :play-group-commands
-                                     :group-id g
-                                     :iterations 1}
-                                    {:type :group 
-                                     :command :write-outbox-entries
-                                     :group-id g
-                                     :iterations 1}
-                                    {:type :group
-                                     :command :apply-log-entries
-                                     :group-id g
-                                     :iterations 1}])
-                                 (keys groups))))
+  (let [commands (reduce into 
+                         []
+                         (repeat 5
+                                 (mapcat 
+                                  (fn [g] 
+                                    [{:type :group
+                                      :command :play-group-commands
+                                      :group-id g
+                                      :iterations 1}
+                                     {:type :group 
+                                      :command :write-outbox-entries
+                                      :group-id g
+                                      :iterations 1}
+                                     {:type :group
+                                      :command :apply-log-entries
+                                      :group-id g
+                                      :iterations 1}])
+                                  ;; FIXME, shuffle may be papering over join issue
+                                  (shuffle (vec (keys groups))))))
         new-groups (reduce apply-group-command groups commands)]
+    ;; Not joined, one is kicking the other off and on
     (if (= groups new-groups)
       ;; Drained 
       new-groups
-      (recur new-groups))))
+      (do
+       ;; BROKEN TEST CASE target/test_check_output/testcase.2016_17_10_00-37-20-tttt.edn
+       (println "One more cycle since there are new groups" (keys groups) (keys new-groups))
+       (recur new-groups)))))
 
 (defn group-id->port [gid]
   (+ 40000 (Integer/parseInt (apply str (rest (name gid))))))
 
 (defn new-group [peer-config group-id]
-  (println "peer-config" peer-config group-id)
   {:peer-state {}
    :state (-> (onyx.api/start-peer-group (assoc peer-config :onyx.messaging/peer-port (group-id->port group-id)))
               :peer-group-manager 
@@ -349,7 +357,7 @@
       groups)))
 
 (defn apply-orchestration-command [groups peer-config {:keys [command group-id]}]
-  (println "Applying " command group-id "peerconfig " peer-config)
+  ;(println "Applying " command group-id "peerconfig " peer-config)
   (case command
     :remove-peer-group
     (do (when-let [group (get groups group-id)]
@@ -509,9 +517,8 @@
             embedded-media-driver (component/start (aeron/->EmbeddedMediaDriver 
                                                     (assoc peer-config 
                                                            :onyx.messaging.aeron/embedded-driver? (= messenger-type :aeron))))]
-        (println "Starting run")
         (try
-         (let [final-groups (reduce #(apply-event peer-config %1 %2) groups events)
+         (let [final-groups (reduce #(apply-event peer-config %1 %2) groups (vec events))
                ;_ (println "Final " @zookeeper-log)
                _ (println "Number log entries:" (count @zookeeper-log))
                ;; FIXME, shouldn't have to hack version in everywhere

@@ -5,7 +5,6 @@
             [com.stuartsierra.component :as component]
             [taoensso.timbre :refer [fatal info debug] :as timbre]
             [onyx.messaging.aeron.peer-manager :as pm]
-            [onyx.messaging.protocol-aeron :as protocol]
             [onyx.messaging.common :as common]
             [onyx.types :as t :refer [->MonitorEventBytes map->Barrier ->Message ->Barrier ->BarrierAck]]
             [onyx.messaging.messenger :as m]

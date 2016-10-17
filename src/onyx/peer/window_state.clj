@@ -8,7 +8,7 @@
               [onyx.windowing.window-extensions :as we]
               [onyx.lifecycles.lifecycle-invoke :as lc]
               [onyx.protocol.task-state :refer :all]
-              [onyx.types :refer [->Ack ->Results ->MonitorEvent dec-count! inc-count! new-state-event]]
+              [onyx.types :refer [->MonitorEvent new-state-event]]
               [onyx.state.state-extensions :as state-extensions]
               [onyx.static.default-vals :refer [defaults arg-or-default]]))
 

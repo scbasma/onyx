@@ -11,7 +11,7 @@
   (assoc messenger :id peer))
 
 (defn offer-barriers [messenger]
-  (reduce m/offer-barrier (m/next-epoch messenger) (m/publications messenger)))
+  (reduce m/offer-barrier (m/next-epoch! messenger) (m/publications messenger)))
 
 (defn offer-barrier-acks [messenger]
   (reduce m/offer-barrier-ack messenger (m/publications messenger)))

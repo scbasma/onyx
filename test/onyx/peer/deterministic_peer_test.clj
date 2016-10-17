@@ -307,8 +307,8 @@
                                                             groups)
                                                            ))))
                   ;; Allows emitting exhaust-inputs and thus job completion
-                  drain-commands [{:type :drain-commands}]]
-              (concat finish-iterations drain-commands)))
+                  drain-commands [{:type :drain-commands :t :e}]]
+              (into finish-iterations drain-commands)))
           jobs)) 
 
 (defn add-enough-peer-cmds 
@@ -363,9 +363,6 @@
     (job-state-properties expected-state job-id job-state)))
 
 (defn run-test [{:keys [phases] :as generated}]
-         (assert (:media-driver-type generated) (keys generated))
-  ;; FIXME REMOVE
-  ;(onyx.messaging.aeron/reset-tracked-messages!)
   (let [_ (reset! state-atom {})
         _ (reset! key-slot-tracker {})
         all-gen-cmds (apply concat phases)
@@ -379,22 +376,22 @@
         _ (assert (= 2 (count phases)))
         all-cmds (concat 
                    (first phases)
-                   [{:type :drain-commands}]
+                   [{:type :drain-commands :t :a}]
                    ;; Start with enough peers to finish the job, 
                    ;; just to get a nice mix of task iterations 
                    ;; This probably should be removed sometimes
                    final-add-peer-cmds 
                    ;; Ensure all the peer joining activities have finished
-                   [{:type :drain-commands}]
+                   [{:type :drain-commands :t :b}]
                    (second phases)
                    ;; Then add enough peers to complete the job
                    final-add-peer-cmds 
                    ;; Ensure they've fully joined
-                   [{:type :drain-commands}]
+                   [{:type :drain-commands :t :c}]
                    ;; Complete the job
                    ;; FIXME: not sure why so many iterations are required when using grouping
                    (job-completion-cmds unique-groups jobs 1000)
-                   [{:type :drain-commands}])
+                   [{:type :drain-commands :t :d}])
         model (g/model-commands all-cmds)
         ;_ (println "Start run" (count gen-cmds))
         _ (assert (:media-driver-type generated))

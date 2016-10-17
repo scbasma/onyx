@@ -10,7 +10,6 @@
             [onyx.messaging.messenger-state :as ms]
             [onyx.extensions :as extensions]
             [onyx.log.replica]
-            [onyx.types :refer [->Results ->MonitorEvent map->Event dec-count! inc-count!]]
             [onyx.static.default-vals :refer [defaults arg-or-default]]))
 
 (defn required-input-checkpoints [replica job-id]
