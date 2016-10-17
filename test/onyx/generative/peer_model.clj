@@ -239,7 +239,6 @@
 
                        :write-group-command
                        (do 
-                        (println (.buf (:group-ch state)))
                         (when (> (count (.buf (:group-ch state))) 99999)
                           (throw (Exception. (str "Too much for buffer " (count (.buf (:group-ch state)))))))
                         (>!! (:group-ch state) (:args event))

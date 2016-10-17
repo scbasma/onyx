@@ -126,7 +126,7 @@
                           (m/poll-acks)
                           )
             m-p2-next-acks (-> m-p2-acks
-                               (m/flush-acks)
+                               (m/unblock-ack-subscriptions!)
                                (m/poll-acks)
                                (m/poll-acks))]
         (is (m/all-acks-seen? m-p1-acks))

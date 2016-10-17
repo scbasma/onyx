@@ -55,4 +55,4 @@
   ;; Try to remove multi phase receive/flush. 
   ;; Required for immutable testing version
   (poll-acks [messenger])
-  (flush-acks [messenger]))
+  (unblock-ack-subscriptions! [messenger]))

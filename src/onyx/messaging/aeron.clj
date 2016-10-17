@@ -627,7 +627,8 @@
 
   (set-replica-version! [messenger rv]
     (set! read-index 0)
-    (run! (fn [sub] (reset! (:barrier-ack sub) nil)) ack-subscriptions)
+    (m/unblock-ack-subscriptions! messenger)
+    ;(unblock-subscriptions! messenger)
     (run! (fn [sub] (reset! (:barrier sub) nil)) subscriptions)
     (run! (fn [sub]
             (set-replica-version! (:segments-handler sub) rv)
@@ -666,7 +667,7 @@
       (select-keys @(:barrier-ack (first ack-subscriptions)) 
                    [:replica-version :epoch])))
 
-  (flush-acks [messenger]
+  (unblock-ack-subscriptions! [messenger]
     (run! (fn [sub] (reset! (:barrier-ack sub) nil)) ack-subscriptions)
     messenger)
 

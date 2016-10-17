@@ -152,8 +152,8 @@
     (update-messenger-atom! messenger m/unblock-subscriptions!)
     messenger)
 
-  (flush-acks [messenger]
-    (update-messenger-atom! messenger m/flush-acks)
+  (unblock-ack-subscriptions! [messenger]
+    (update-messenger-atom! messenger m/unblock-ack-subscriptions!)
     messenger)
 
   (all-barriers-seen? [messenger]

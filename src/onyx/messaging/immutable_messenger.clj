@@ -282,7 +282,7 @@
                (fn [ss]
                  (mapv (fn [s] (take-ack messenger s)) ss))))
 
-  (flush-acks [messenger]
+  (unblock-ack-subscriptions! [messenger]
     (update-in messenger 
                [:ack-subscriptions id]
                (fn [ss]

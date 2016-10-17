@@ -1,7 +1,6 @@
 (ns onyx.protocol.task-state)
 
 (defprotocol PTaskStateMachine
-  (kill [this])
   (killed? [this])
   (stop [this])
   (initial-state? [this])

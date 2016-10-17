@@ -307,7 +307,7 @@
                                                             groups)
                                                            ))))
                   ;; Allows emitting exhaust-inputs and thus job completion
-                  drain-commands [{:type :drain-commands :t :e}]]
+                  drain-commands [{:type :drain-commands}]]
               (into finish-iterations drain-commands)))
           jobs)) 
 
@@ -376,22 +376,22 @@
         _ (assert (= 2 (count phases)))
         all-cmds (concat 
                    (first phases)
-                   [{:type :drain-commands :t :a}]
+                   [{:type :drain-commands}]
                    ;; Start with enough peers to finish the job, 
                    ;; just to get a nice mix of task iterations 
                    ;; This probably should be removed sometimes
                    final-add-peer-cmds 
                    ;; Ensure all the peer joining activities have finished
-                   [{:type :drain-commands :t :b}]
+                   [{:type :drain-commands}]
                    (second phases)
                    ;; Then add enough peers to complete the job
                    final-add-peer-cmds 
                    ;; Ensure they've fully joined
-                   [{:type :drain-commands :t :c}]
+                   [{:type :drain-commands}]
                    ;; Complete the job
                    ;; FIXME: not sure why so many iterations are required when using grouping
                    (job-completion-cmds unique-groups jobs 1000)
-                   [{:type :drain-commands :t :d}])
+                   [{:type :drain-commands}])
         model (g/model-commands all-cmds)
         ;_ (println "Start run" (count gen-cmds))
         _ (assert (:media-driver-type generated))
@@ -425,11 +425,6 @@
     (prop-is (= (count (apply concat (vals (:peers model)))) 
                 (count (:peers replica))) ["peers" (:peers model) (:peers replica)])
     (println "Replica is " replica)
-    (println "JOBS IS " jobs)
-    (println "Comparison"
-             (count jobs)
-             (count (:completed-jobs replica))
-             (= (count jobs) (count (:completed-jobs replica))))
     (prop-is (= (count jobs) (count (:completed-jobs replica))) "jobs not completed")
     (state-properties expected-state @state-atom)
     ;; FIXME requires fix to how tasks can be blocked. See above trigger
