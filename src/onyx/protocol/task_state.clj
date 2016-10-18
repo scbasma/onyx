@@ -17,6 +17,7 @@
   (set-windows-state! [this new-windows-state])
   (add-barrier! [this epoch barrier])
   (remove-barrier! [this epoch])
+  (print-state [this])
   (get-barrier [this epoch])
   (set-event! [this new-event])
   (get-event [this])

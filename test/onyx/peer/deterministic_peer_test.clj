@@ -442,6 +442,7 @@
 (defspec deterministic-abs-test {;:seed X 
                                  :num-tests (times 1000)}
   (for-all [uuid-seed (gen/no-shrink gen/int)
+            drain-seed (gen/no-shrink gen/int)
             media-driver-type (gen/elements [:shared #_:shared-network #_:dedicated])
             n-jobs (gen/return 1) ;(gen/resize 4 gen/s-pos-int) 
             ;; Number of peers on each input task
@@ -472,6 +473,7 @@
            (let [generated {:phases phases 
                             :messenger-type :aeron
                             :media-driver-type media-driver-type
+                            :drain-seed drain-seed
                             :uuid-seed uuid-seed}]
 
              ;; Write all the time

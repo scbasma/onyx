@@ -384,8 +384,8 @@
                                 :recover-handler
                                 init)
             assembler (:recover-assembler sub-info)]
-        (.controlledPoll ^Subscription subscription ^ControlledFragmentHandler assembler fragment-limit-receiver))
-      (println "poll-new-replica!, after" (sub-info-meta messenger sub-info)))))
+        (.controlledPoll ^Subscription subscription ^ControlledFragmentHandler assembler fragment-limit-receiver)))
+    (println "poll-new-replica!, after" (sub-info-meta messenger sub-info))))
 
 
 (defn poll-acks! [messenger sub-info]

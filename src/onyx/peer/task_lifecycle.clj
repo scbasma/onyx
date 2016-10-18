@@ -352,56 +352,15 @@
        (advance state))
       state)))
 
-(defn print-state [state]
-  (let [event (get-event state)
-        messenger (get-messenger state)
-        task-map (:task-map event)] 
-    (when (#{:input :function :output} (:onyx/type task-map)) 
-      (println "Task state" 
-             (:onyx/type task-map) 
-             (:onyx/name task-map)
-             :slot
-             (:slot-id event)
-             (:id event)
-             ;; FIXME LIFECYCLE
-             ;(:lifecycle state)
-             ; FIXME STATE
-             ;(:state state)
-             :rv
-             (m/replica-version messenger)
-             :e
-             (m/epoch messenger))
-             :n-subs
-             (count (m/subscriptions messenger))
-             :n-pubs
-             (count (m/publications messenger))
-             ;; re-add
-             ;:port
-             ;(:port (:messenger-group messenger))
-             :batch
-             (:batch event)
-             :segments-gen
-             (:segments (:results event))
-             ;; FIXME
-             #_(if (= :input (:onyx/type task-map))
-               [:barriers-first-5 (vec (take 5 (sort-by key (:barriers state))))])))
-  state)
-
 (defn iteration [state-machine replica]
-  (let [event (get-event state-machine)
-        job-id (get event :job-id)
-        _ (assert job-id)
-        old-replica (get-replica state-machine)
-        old-version (get-in old-replica [:allocation-version job-id])
-        new-version (get-in replica [:allocation-version job-id])]
-    (if-not (= old-version new-version)
-      (next-replica! state-machine replica)
-      (loop [sm state-machine]
-        ;(print-state state)
-        (let [next-sm (exec sm)]
-          (if (or (not (advanced? sm)) (initial-state? sm))
-            next-sm
-            (recur next-sm)))))))
+  (if-not (= (get-replica state-machine) replica)
+    (next-replica! state-machine replica)
+    (loop [sm state-machine]
+      (print-state sm)
+      (let [next-sm (exec sm)]
+        (if (or (not (advanced? sm)) (initial-state? sm))
+          next-sm
+          (recur next-sm))))))
 
 (defn run-task-lifecycle
   "The main task run loop, read batch, ack messages, etc."
@@ -526,7 +485,8 @@
 
 (deftype TaskStateMachine [^int processing-idx 
                            ^int nstates 
-                           #^"[Lclojure.lang.IFn;" state-fns 
+                           lifecycle-names
+                           #^"[Lclojure.lang.IFn;" lifecycle-fns 
                            ^:unsynchronized-mutable ^int idx 
                            ^:unsynchronized-mutable ^java.lang.Boolean advanced 
                            ^:unsynchronized-mutable exhausted
@@ -551,6 +511,35 @@
     (= idx processing-idx))
   (advanced? [this]
     advanced)
+  (print-state [this]
+    (let [task-map (:task-map event)] 
+      (println "Task state" 
+               [(:onyx/type task-map)
+                (:onyx/name task-map)
+                :slot
+                (:slot-id event)
+                (:id event)
+                (get lifecycle-names idx)
+                :adv? advanced
+                :rv
+                (m/replica-version messenger)
+                :e
+                (m/epoch messenger)
+                :n-subs
+                (count (m/subscriptions messenger))
+                :n-pubs
+                (count (m/publications messenger))
+                ;; re-add
+                ;:port
+                ;(:port (:messenger-group messenger))
+                :batch
+                (:batch event)
+                :segments-gen
+                (:segments (:results event))
+                ;; FIXME
+                #_(if (= :input (:onyx/type task-map))
+                    [:barriers-first-5 (vec (take 5 (sort-by key (:barriers state))))])]))
+    this)
   (set-context! [this new-context]
     (set! context new-context)
     this)
@@ -567,18 +556,22 @@
   (get-pipeline [this]
     pipeline)
   (next-replica! [this new-replica]
-    (let [{:keys [job-id task-type]} event 
-          next-messenger (ms/next-messenger-state! messenger event replica new-replica)
-          ;; Coordinator must be transitioned before recovery, as the coordinator
-          ;; emits the barrier with the recovery information in 
-          next-coordinator (coordinator/next-state coordinator replica new-replica)]
-      (set! barriers {})
-      (-> this
-          (set-exhausted! false)
-          (set-coordinator! next-coordinator)
-          (set-messenger! next-messenger)
-          (set-replica! new-replica)
-          (start-recover!))))
+    (let [job-id (get event :job-id)
+          old-version (get-in replica [:allocation-version job-id])
+          new-version (get-in new-replica [:allocation-version job-id])]
+      (if (= old-version new-version)
+        this
+        (let [next-messenger (ms/next-messenger-state! messenger event replica new-replica)
+              ;; Coordinator must be transitioned before recovery, as the coordinator
+              ;; emits the barrier with the recovery information in 
+              next-coordinator (coordinator/next-state coordinator replica new-replica)]
+          (set! barriers {})
+          (-> this
+              (set-exhausted! false)
+              (set-coordinator! next-coordinator)
+              (set-messenger! next-messenger)
+              (set-replica! new-replica)
+              (start-recover!))))))
   (set-windows-state! [this new-windows-state]
     (set! windows-state new-windows-state)
     this)
@@ -623,8 +616,7 @@
     coordinator)
   (exec [this]
     (set! advanced false)
-    (let [task-fn (aget state-fns idx)]
-      (println "Calling task-fn" task-fn (:task-type event))
+    (let [task-fn (aget lifecycle-fns idx)]
       (task-fn this)))
   (advance [this]
     (let [new-idx ^int (unchecked-add-int idx 1)]
@@ -638,6 +630,7 @@
   (let [windowed? (or (not (empty? windows))
                       (not (empty? triggers)))
         lifecycles (filter-task-lifecycles (:onyx/type task-map) windowed?)
+        names (mapv :lifecycle lifecycles)
         arr (into-array clojure.lang.IFn (map :fn lifecycles))
         processing-idx (->> lifecycles
                             (map-indexed (fn [idx v]
@@ -645,7 +638,7 @@
                                              idx)))
                             (remove nil?)
                             (first))]
-    (->TaskStateMachine (int processing-idx) (alength arr) arr (int 0) false false replica messenger coordinator 
+    (->TaskStateMachine (int processing-idx) (alength arr) names arr (int 0) false false replica messenger coordinator 
                         pipeline event event nil (c/event->windows-states event) nil)))
 
 (defn backoff-until-task-start! [{:keys [kill-ch task-kill-ch opts] :as event}]

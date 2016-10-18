@@ -245,37 +245,42 @@
                         state)))))
     groups))
 
+(defn shuffle-seeded [coll random]
+  (let [al (java.util.ArrayList. (vec coll))]
+      (java.util.Collections/shuffle al random) 
+      (clojure.lang.RT/vector (.toArray al))))
+
+;; FIXME: Drain commands is currently imperfect and may stop recurring 
+;; before the peers have completely drained
 (defn drain-commands 
   "Repeatedly plays a stanza of commands that will ensure all operations are complete"
-  [groups]
-  (let [commands (reduce into 
-                         []
-                         (repeat 5
-                                 (mapcat 
-                                  (fn [g] 
-                                    [{:type :group
-                                      :command :play-group-commands
-                                      :group-id g
-                                      :iterations 1}
-                                     {:type :group 
-                                      :command :write-outbox-entries
-                                      :group-id g
-                                      :iterations 1}
-                                     {:type :group
-                                      :command :apply-log-entries
-                                      :group-id g
-                                      :iterations 1}])
-                                  ;; FIXME, shuffle may be papering over join issue
-                                  (shuffle (vec (keys groups))))))
-        new-groups (reduce apply-group-command groups commands)]
+  [random-gen groups]
+  (let [commands (apply concat 
+                        (repeat 5 
+                                (mapcat 
+                                 (fn [[g _]] 
+                                   [{:type :group
+                                     :command :play-group-commands
+                                     :group-id g
+                                     :iterations 1}
+                                    {:type :group 
+                                     :command :write-outbox-entries
+                                     :group-id g
+                                     :iterations 1}
+                                    {:type :group
+                                     :command :apply-log-entries
+                                     :group-id g
+                                     :iterations 1}])
+                                 groups)))
+        ;; Need to randomize peer-group playback a little otherwise you can get into join cycles
+        new-groups (reduce apply-group-command groups (shuffle-seeded commands random-gen))]
     ;; Not joined, one is kicking the other off and on
     (if (= groups new-groups)
       ;; Drained 
       new-groups
       (do
-       ;; BROKEN TEST CASE target/test_check_output/testcase.2016_17_10_00-37-20-tttt.edn
        (println "One more cycle since there are new groups" (keys groups) (keys new-groups))
-       (recur new-groups)))))
+       (recur random-gen new-groups)))))
 
 (defn group-id->port [gid]
   (+ 40000 (Integer/parseInt (apply str (rest (name gid))))))
@@ -327,7 +332,8 @@
         (#{:periodic-barrier :offer-barriers} command)
         (set-coordinator! prev-state (next-coordinator-state (get-coordinator prev-state) command))))
 
-(defn apply-peer-commands [groups {:keys [command group-id peer-owner-id]}]
+(defn apply-peer-commands [groups {:keys [command group-id peer-owner-id] :as event}]
+  ;(println "Apply peer command" event)
   (let [group (get groups group-id)
         peer-id (get-peer-id group peer-owner-id)]
     (if peer-id
@@ -369,14 +375,15 @@
                 group
                 (new-group peer-config group-id))))))
 
-(defn apply-event [peer-config groups event]
+(defn apply-event [random-drain-gen peer-config groups event]
   (try
+   ;(println "applying event" event)
    (if (vector? event)
-     (reduce #(apply-event peer-config %1 %2) groups event)
+     (reduce #(apply-event random-drain-gen peer-config %1 %2) groups event)
      (case (:type event)
 
        :drain-commands
-       (drain-commands groups)
+       (drain-commands random-drain-gen groups)
 
        :orchestration
        (apply-orchestration-command groups peer-config event)
@@ -435,11 +442,12 @@
   (stop [component]
     component))
 
-(defn play-events [{:keys [events uuid-seed messenger-type media-driver-type] :as generated}]
+(defn play-events [{:keys [events uuid-seed drain-seed messenger-type media-driver-type] :as generated}]
   (let [zookeeper-log (atom nil)
         zookeeper-store (atom nil)
         checkpoints (atom nil)
-        random-gen (atom nil)
+        random-gen (java.util.Random. uuid-seed)
+        random-drain-gen (java.util.Random. drain-seed)
         shared-immutable-messenger (atom nil)
         ;; Share a messaging peer group even if we use separate groups
         shared-peer-group (fn [peer-config]
@@ -452,8 +460,8 @@
                   ;; Make peer group linearizable by dropping the thread / loop
                   pm/peer-group-manager-loop (fn [state])
                   onyx.static.uuid/random-uuid (fn [] 
-                                                 (java.util.UUID. (.nextLong @random-gen)
-                                                                  (.nextLong @random-gen)))
+                                                 (java.util.UUID. (.nextLong random-gen)
+                                                                  (.nextLong random-gen)))
                   onyx.peer.coordinator/start-coordinator! (fn [state] state)
                   onyx.peer.coordinator/stop-coordinator! (fn [coordinator] 
                                                             (let [state (:coordinator-thread coordinator)] 
@@ -490,7 +498,6 @@
             _ (reset! zookeeper-store {})
             _ (reset! checkpoints {})
             _ (reset! shared-immutable-messenger (im/immutable-messenger {}))
-            _ (reset! random-gen (java.util.Random. uuid-seed))
             onyx-id (random-uuid)
             config (load-config)
             env-config (assoc (:env-config config) 
@@ -515,7 +522,7 @@
                                                     (assoc peer-config 
                                                            :onyx.messaging.aeron/embedded-driver? (= messenger-type :aeron))))]
         (try
-         (let [final-groups (reduce #(apply-event peer-config %1 %2) groups (vec events))
+         (let [final-groups (reduce #(apply-event random-drain-gen peer-config %1 %2) groups (vec events))
                ;_ (println "Final " @zookeeper-log)
                _ (println "Number log entries:" (count @zookeeper-log))
                ;; FIXME, shouldn't have to hack version in everywhere
