@@ -10,7 +10,8 @@
             [onyx.messaging.messenger :as m]
             [onyx.compression.nippy :refer [messaging-compress messaging-decompress]]
             [onyx.static.default-vals :refer [defaults arg-or-default]])
-  (:import [io.aeron Aeron Aeron$Context ControlledFragmentAssembler Publication Subscription UnavailableImageHandler AvailableImageHandler FragmentAssembler]
+  (:import [io.aeron Aeron Aeron$Context ControlledFragmentAssembler Publication Subscription Image 
+            UnavailableImageHandler AvailableImageHandler FragmentAssembler]
            [io.aeron.logbuffer FragmentHandler]
            [io.aeron.driver MediaDriver MediaDriver$Context ThreadingMode]
            [io.aeron.logbuffer ControlledFragmentHandler ControlledFragmentHandler$Action]
@@ -62,7 +63,6 @@
 
 (defmethod m/get-peer-site :aeron
   [peer-config]
-  (println "GET PEER SITE" (mc/external-addr peer-config))
   {:address (mc/external-addr peer-config)
    :port (:onyx.messaging/peer-port peer-config)})
 
@@ -130,7 +130,8 @@
 
 (defn subscription-aligned?
   [sub-ticket]
-  (empty? (:aligned sub-ticket)))
+  true
+  #_(empty? (:aligned sub-ticket)))
 
 (defn is-next-barrier? [replica-version epoch barrier]
   (and (= replica-version (:replica-version barrier))
@@ -148,7 +149,8 @@
          (:emitted? barrier-val))))
 
 (defprotocol PartialSubscriber 
-  (init [this] [this new-ticket])
+  (init [this])
+  (set-ticket [this new-ticket])
   (set-replica-version! [this new-replica-version])
   (set-epoch! [this new-epoch])
   (get-batch [this]))
@@ -163,7 +165,10 @@
         (= action ControlledFragmentHandler$Action/COMMIT)
         :COMMIT))
   
-(deftype RecoverFragmentHandler [src-peer-id dst-task-id barrier ^:unsynchronized-mutable replica-version ^:unsynchronized-mutable epoch]
+(deftype RecoverFragmentHandler [src-peer-id dst-task-id 
+                                 barrier 
+                                 ;^:unsynchronized-mutable aligned ^:unsynchronized-mutable ticket 
+                                 ^:unsynchronized-mutable replica-version ^:unsynchronized-mutable epoch]
   PartialSubscriber
   (set-replica-version! [this new-replica-version]
     (set! replica-version new-replica-version)
@@ -196,13 +201,14 @@
 
                     :else
                     ControlledFragmentHandler$Action/ABORT)]
-      (println [:recover (action->kw ret) dst-task-id src-peer-id] (.position header) message)
+      (println [:recover (action->kw ret) :dst dst-task-id :src src-peer-id :rv replica-version :e epoch] (.position header) message)
       ;(add-tracked-message! messenger dst-task-id src-peer-id message ret [:poll-new-barrier dst-task-id src-peer-id])
       ret)))
 
 ;; TODO, can skip everything if it's the wrong image completely
 (deftype ReadSegmentsFragmentHandler 
-  [src-peer-id dst-task-id barrier ^:unsynchronized-mutable ticket ^:unsynchronized-mutable batch 
+  [src-peer-id dst-task-id barrier 
+   ^:unsynchronized-mutable ticket ^:unsynchronized-mutable batch 
    ^:unsynchronized-mutable replica-version ^:unsynchronized-mutable epoch]
   PartialSubscriber
   (set-replica-version! [this new-replica-version]
@@ -211,9 +217,11 @@
   (set-epoch! [this new-epoch]
     (set! epoch new-epoch)
     this)
-  (init [this new-ticket]
-    (set! ticket new-ticket)
+  (init [this]
     (set! batch (transient []))
+    this)
+  (set-ticket [this new-ticket]
+    (set! ticket new-ticket)
     this)
   (get-batch [this]
     (persistent! batch))
@@ -250,7 +258,7 @@
                      ;; FIXME, not sure if this logically works.
                      ;; If ticket gets updated in mean time, then is this always invalid and should be continued?
                      ;; WORK OUT ON PAPER
-                     (when (compare-and-set! ticket ticket-val position)
+                     (when true ;(compare-and-set! ticket ticket-val position)
                        (do 
                         (assert (coll? (:payload message)))
                         (reduce conj! batch (:payload message))))
@@ -281,18 +289,6 @@
    :pub-info (select-keys pub-info [:src-peer-id :dst-task-id :slot-id :site])])
 
 (defn sub-info-meta [messenger {:keys [subscription barrier] :as sub-info}]
-  (println "Image count" (count (.images subscription)))
-  #_(assert (<= (count (.images subscription)) 1)
-          [:stream-id
-          (.streamId subscription)
-           (mapv (fn [i] [:pos (.position i) 
-                          :term-id (.initialTermId i) 
-                          :session-id (.sessionId i) 
-                          :closed? (.isClosed i) 
-                          :corr-id (.correlationId i) 
-                          :source-id (.sourceIdentity i)]) 
-                 (.images subscription))]
-          )
   [:rv (m/replica-version messenger)
    :e (m/epoch messenger)
    :unblocked? (boolean (unblocked? messenger sub-info))
@@ -313,33 +309,54 @@
    :sub-info (select-keys sub-info [:src-peer-id :dst-task-id :slot-id :site])])
 
 (defn poll-messages! [messenger sub-info]
-  (let [{:keys [src-peer-id dst-task-id subscription]} sub-info
-        sub-ticket (m/get-ticket messenger sub-info)]
-    (println "poll-messages!:" (sub-info-meta messenger sub-info) "sub ticket" sub-ticket)
+  (let [{:keys [src-peer-id dst-task-id subscription aligned-peers]} sub-info
+        ;sub-ticket (m/get-ticket messenger sub-info)
+        ]
+    (println "poll-messages!:" (sub-info-meta messenger sub-info))
     ;; May not need to check for alignment here, can prob just do in :recover
-    (if (and (subscription-aligned? sub-ticket)
-             (unblocked? messenger sub-info))
+    (if ;and (subscription-aligned? sub-ticket)
+      (unblocked? messenger sub-info)
       (let [handler (-> sub-info
                         :segments-handler
-                        (init (:ticket sub-ticket)))
+                        (init))
             assembler (:segments-assembler sub-info)
-            _ (.controlledPoll ^Subscription subscription ^ControlledFragmentHandler assembler fragment-limit-receiver)
-            batch (get-batch handler)]
-        (println "polled batch:" batch)
-        batch)
+            images (.images ^Subscription subscription)]
+        (run! (fn [img]
+                (let [;; rationalise
+                      image-aligned (get-in @(m/ticket-counters messenger) [(.correlationId img) :aligned])
+                      ticket (get-in @(m/ticket-counters messenger) [(.correlationId img) :ticket])] 
+                  (println (set aligned-peers) "vs" (clojure.set/intersection (set aligned-peers) (set image-aligned)))
+                  (if (= (set aligned-peers) 
+                         (clojure.set/intersection (set aligned-peers) (set image-aligned)))
+                    (.controlledPoll ^Image img 
+                                     ^ControlledFragmentHandler (set-ticket assembler ticket)
+                                     fragment-limit-receiver)
+                    (println "Polling not aligned"))))
+              images)
+        (let [batch (get-batch handler)]
+          (println "polled batch:" batch)
+          batch))
       [])))
 
 (defn poll-new-replica! [messenger sub-info]
-  (let [{:keys [src-peer-id dst-task-id subscription barrier]} sub-info
-        sub-ticket (m/get-ticket messenger sub-info)]
-    (println "poll-new-replica!, before:" (sub-info-meta messenger sub-info))
-    (if (subscription-aligned? sub-ticket)
-      (let [recover-handler (-> sub-info
-                                :recover-handler
-                                init)
-            assembler (:recover-assembler sub-info)]
-        (.controlledPoll ^Subscription subscription ^ControlledFragmentHandler assembler fragment-limit-receiver)))
-    (println "poll-new-replica!, after" (sub-info-meta messenger sub-info))))
+  (let [{:keys [src-peer-id dst-task-id subscription barrier aligned-peers]} sub-info]
+    (println "poll-new-replica!, before:" (.id messenger) (sub-info-meta messenger sub-info))
+    (let [recover-handler (-> sub-info
+                              :recover-handler
+                              init)
+          assembler (:recover-assembler sub-info)
+          images (.images ^Subscription subscription)]
+      (run! (fn [img]
+              (let [image-aligned (get-in @(m/ticket-counters messenger) [(.correlationId img) :aligned])] 
+                (println (set aligned-peers) "vs" (clojure.set/intersection (set aligned-peers) (set image-aligned)))
+                (if (= (set aligned-peers) 
+                       (clojure.set/intersection (set aligned-peers) (set image-aligned)))
+                  (do
+                   (println "polling image id " (.correlationId img))
+                   (.controlledPoll ^Image img ^ControlledFragmentHandler assembler fragment-limit-receiver))
+                  (println "Polling replica not aligned."))))
+            images))
+    (println "poll-new-replica!, after" (.id messenger) (sub-info-meta messenger sub-info))))
 
 (defn handle-drain
   [sub-info buffer offset length header]
@@ -349,19 +366,31 @@
     ;(println "DRAIN MESSAGE SUB hash" (hash-sub sub-info) sub-info "message" message)
     ControlledFragmentHandler$Action/CONTINUE))
 
-(defn unavailable-image-drainer [sub-info]
+(defn unavailable-image [sub-info ticket-counters]
   (reify UnavailableImageHandler
     (onUnavailableImage [this image] 
-      (.println (System/out) (str "UNAVAILABLE image " (.position image) " " (.sessionId image) " " sub-info)))))
+      ;; Cleanup unused tickets
+      (.println (System/out) (str "UNAVAILABLE image:" :corr (.correlationId image) :pos (.position image) " " (.sessionId image) " " sub-info)))))
 
-(defn available-image [sub-info]
+(defn available-image [id sub-info ticket-counters]
   (reify AvailableImageHandler
-    (onAvailableImage [this image] 
-      (.println (System/out) (str "AVAILABLE image " (.position image) " " (.sessionId image) " " sub-info)))))
+    (onAvailableImage [this image]
+      (swap! ticket-counters 
+             update 
+             (.correlationId image)
+             (fn [sub-ticket]
+               (if sub-ticket
+                 (update sub-ticket :aligned conj id)
+                 {:ticket (atom -1)
+                  :aligned #{id}})))
+      (.println (System/out) (str "AVAILABLE image:" :corr (.correlationId image) :pos (.position image) " " (.sessionId image) " " sub-info)))))
 
 (defn new-subscription 
-  [messenger messenger-group {:keys [job-id src-peer-id dst-task-id slot-id site] :as sub-info}]
-  (let [error-handler (reify ErrorHandler
+  [messenger {:keys [job-id src-peer-id dst-task-id slot-id site] :as sub-info}]
+  (let [messenger-group (.messenger-group messenger)
+        ticket-counters (m/ticket-counters messenger)
+        id (.id messenger)
+        error-handler (reify ErrorHandler
                         (onError [this x] 
                           (println "Aeron messaging subscriber error" x)
                           ;(System/exit 1)
@@ -370,9 +399,10 @@
         ctx (-> (Aeron$Context.)
                 (.errorHandler error-handler)
                 ;(.aeronDirectoryName @aeron-dir-name)
-                (.availableImageHandler (available-image sub-info))
-                (.unavailableImageHandler (unavailable-image-drainer sub-info)))
+                (.availableImageHandler (available-image id sub-info ticket-counters))
+                (.unavailableImageHandler (unavailable-image sub-info ticket-counters)))
         conn (Aeron/connect ctx)
+        _ (assert messenger-group)
         bind-addr (:bind-addr messenger-group)
         port (:port messenger-group)
         channel (mc/aeron-channel bind-addr port)
@@ -392,6 +422,7 @@
                         :segments-handler segments-fragment-handler
                         :segments-assembler segments-fragment-handler
                         :barrier barrier)]
+    (assert (not (empty? (:aligned-peers sub-info))))
     (println "New sub:" (sub-info-meta messenger sub-info))
     sub-info))
 
@@ -422,9 +453,12 @@
   (.close ^Subscription (:subscription sub-info))
   (.close (:conn sub-info)))
 
+(defn sub-id [sub-info]
+  (select-keys sub-info [:src-peer-id :dst-task-id :slot-id :site]))
+
 (defn equiv-sub [sub-info1 sub-info2]
-  (= (select-keys sub-info1 [:src-peer-id :dst-task-id :slot-id]) 
-     (select-keys sub-info2 [:src-peer-id :dst-task-id :slot-id])))
+  (= (sub-id sub-info1) 
+     (sub-id sub-info2)))
 
 (defn remove-from-subscriptions 
   [subscriptions {:keys [dst-task-id slot-id] :as sub-info}]
@@ -470,10 +504,29 @@
   (assert (not (:emitted? (:barrier subscriber))))
   (swap! (:barrier subscriber) assoc :emitted? true))
 
-(defn allocation-changed? [replica job-id replica-version]
-  (and (some #{job-id} (:jobs replica))
-       (not= replica-version
-             (get-in replica [:allocation-version job-id]))))
+(defn reconcile-sub [messenger old-sub new-sub]
+  (cond (and old-sub (nil? new-sub))
+        (do (close-sub! old-sub)
+            nil)
+        (and (nil? old-sub) new-sub)
+        (new-subscription messenger new-sub)
+        :else
+        (merge old-sub new-sub)))
+
+(defn transition-subscriptions [messenger prev nxt]
+  (let [m-prev (into {} 
+                     (map (juxt sub-id identity))
+                     prev)
+        m-next (into {} 
+                     (map (juxt sub-id identity))
+                     nxt)
+        all-keys (into (set (keys m-prev)) 
+                       (keys m-next))]
+    (vec (keep (fn [k]
+                 (let [old (m-prev k)
+                       new (m-next k)]
+                   (reconcile-sub messenger old new)))
+               all-keys))))
 
 (deftype AeronMessenger [messenger-group 
                          id 
@@ -489,7 +542,7 @@
 
   (stop [component]
     (reduce m/remove-publication component (flatten-publications publications))
-    (reduce m/remove-subscription component subscriptions)
+    (run! close-sub! subscriptions)
     (set! ticket-counters nil)
     (set! replica-version -1)
     (set! epoch -1)
@@ -504,18 +557,29 @@
   (subscriptions [messenger]
     subscriptions)
 
-  (add-subscription [messenger sub-info]
-    (set! subscriptions (add-to-subscriptions subscriptions (new-subscription messenger messenger-group sub-info)))
+  (update-subscriptions [messenger sub-infos]
+    (set! subscriptions (transition-subscriptions messenger subscriptions sub-infos))
     messenger)
 
-  (remove-subscription [messenger sub-info]
-    (set! subscriptions (remove-from-subscriptions subscriptions sub-info))
-    messenger)
+  ; (add-subscription [messenger sub-info]
+  ;   ;; TODO: add-subscription should just update-subscription. If it doesn't exist then we add it. If it does exist, we update it
+  ;   ;; We can also update the replica version here, and set-replica-version first
+  ;   (set! subscriptions (add-to-subscriptions subscriptions (new-subscription messenger messenger-group ticket-counters sub-info)))
+  ;   messenger)
+
+  ; (remove-subscription [messenger sub-info]
+  ;   (let [new-subs (remove-from-subscriptions subscriptions sub-info)]
+  ;     (println "New subs" new-subs)
+  ;     (set! subscriptions new-subs))
+  ;   messenger)
+
+  (ticket-counters [messenger] 
+    ticket-counters)
 
   (register-ticket [messenger sub-info]
-    (assert (<= (count (:aligned-peers sub-info)) 1))
+    ;(assert (<= (count (:aligned-peers sub-info)) 1))
     ;; TODO, clear previous versions at some point? Have to worry about other threads though
-    (swap! ticket-counters 
+    #_(swap! ticket-counters 
            update 
            replica-version 
            (fn [tickets]
@@ -555,6 +619,7 @@
   (set-replica-version! [messenger rv]
     (set! read-index 0)
     ; unblock subscriptions
+    (println "Subscriptions" subscriptions)
     (run! (fn [sub] (reset! (:barrier sub) nil)) subscriptions)
     (run! (fn [sub]
             (set-replica-version! (:segments-handler sub) rv)
@@ -614,7 +679,7 @@
         (when sub 
           (if-not @(:barrier sub)
             (poll-new-replica! messenger sub)
-            (println "poll-recover!, has barrier, skip:" (sub-info-meta messenger sub)))
+            (println "poll-recover!," id " has barrier, skip:" (sub-info-meta messenger sub)))
           (recur (rest sbs)))))
     (debug "Seen all subs?: " (m/all-barriers-seen? messenger) :subscriptions (mapv sub-info-meta subscriptions))
     (if (m/all-barriers-seen? messenger)

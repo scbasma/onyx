@@ -253,7 +253,7 @@
                                                    (mapcat (fn [p]
                                                              ;; Iterate on the peers for two cycles
                                                              (concat (apply concat
-                                                                            ;; 5 full task iterations
+                                                                            ;; 5 full iterations over the group per task
                                                                             (repeat 5 
                                                                                     (map 
                                                                                      (fn [g] 

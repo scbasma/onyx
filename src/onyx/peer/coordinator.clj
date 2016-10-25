@@ -45,6 +45,7 @@
                       {:src-peer-id [:coordinator peer-id]
                        :dst-task-id [job-id task]
                        :slot-id -1
+                       ;(get-in replica [:task-slot-ids job-id task id])
                        :site (get-in replica [:peer-sites id])})
                     (get allocations task)))
              input-tasks))))

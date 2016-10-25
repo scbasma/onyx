@@ -35,6 +35,7 @@
                  [clj-fuzzy "0.3.1" :exclusions [org.clojure/clojurescript]]]
   :jvm-opts ["-Xmx8g" 
              "-XX:-OmitStackTraceInFastThrow" 
+             ;"-Daeron.publication.linger.timeout=50000"
              ;"-Daeron.client.liveness.timeout=50000000000"
              "-XX:+UnlockCommercialFeatures"
              "-XX:+FlightRecorder"

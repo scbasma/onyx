@@ -14,6 +14,9 @@
 (defn state-task? [replica job-id task-id]
   (get-in replica [:state-tasks job-id task-id]))
 
+(defn input-task? [replica job-id task-id]
+  (get-in replica [:input-tasks job-id task-id]))
+
 (defn find-physically-task-peers
   "Takes replica and a peer. Returns a set of peers, excluding this peer,
    that reside on the same physical machine."
@@ -24,10 +27,12 @@
          (filter (fn [p]
                    (= (get-in replica [:peer-sites p]) 
                       peer-site)))
-         (filter task-peers))))
+         (filter task-peers)
+         vec)))
 
 (defn get-slot-id [replica job-id task-id peer-id]
-  (if (state-task? replica job-id task-id)
+  (if (or (state-task? replica job-id task-id)
+          (input-task? replica job-id task-id))
     (get-in replica [:task-slot-ids job-id task-id peer-id])
     all-slots))
 
@@ -72,7 +77,12 @@
                                 :src-peer-id [:coordinator coordinator-id]
                                 :dst-task-id [job-id this-task-id]
                                 :site (peer-sites id)
-                                :slot-id all-slots}}  
+                                ;; FIXME, should just be able to use -1 and only send out coord barriers once
+                                :aligned-peers ;[id] 
+                                (do
+                                 (println "PHYSICALLY" (find-physically-task-peers replica peer-opts id job-id this-task-id))
+                                 (find-physically-task-peers replica peer-opts id job-id this-task-id))
+                                :slot-id -1 #_(get-slot-id replica job-id this-task-id id)}}  
                              #{})
                            #{})]
     {:pubs egress-pubs
@@ -87,9 +97,10 @@
     ;; That way you don't get -1 type things
     (as-> messenger m
       (reduce m/add-publication m add-pubs)
-      (reduce m/add-subscription m add-subs)
+      ;(reduce m/add-subscription m add-subs)
       (reduce m/remove-publication m remove-pubs)
-      (reduce m/remove-subscription m remove-subs)
+      ;(reduce m/remove-subscription m remove-subs)
+      (m/update-subscriptions m (:subs new-pub-subs))
       (m/set-replica-version! m new-replica-version))))
 
 (defn assert-consistent-messenger-state [messenger pub-subs pre-post]
