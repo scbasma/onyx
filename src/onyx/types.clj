@@ -60,7 +60,7 @@
    ;; Windowing / grouping
    state grouping-fn uniqueness-task? windowed-task? uniqueness-key task-state task->group-by-fn])
 
-(defrecord Message [src-peer-id dst-task-id slot-id replica-version payload])
+(defrecord Message [src-peer-id dst-task-id slot-id replica-version epoch payload])
 
 (defrecord Barrier [src-peer-id dst-task-id replica-version epoch])
 

@@ -202,7 +202,6 @@
 
 
 ;; Aeron target/test_check_output/testcase.2016_21_10_20-35-57.edn
-
 (defn seal-barriers [state]
   (advance 
    (let [messenger (get-messenger state)] 
@@ -287,6 +286,9 @@
   (let [messenger (get-messenger state)] 
     (if-let [recover (m/poll-recover messenger)]
       (do
+       (println "Poll recover next input, function")
+       ;; WE UNBLOCKED HERE ONCE
+       ;; THEN WE OFFERED UNTIL SUCCESS, THEN WE 
        (m/next-epoch! messenger)
        (-> state
            (set-context! {:recover recover
@@ -300,6 +302,7 @@
   (let [messenger (get-messenger state)] 
     (if-let [recover (m/poll-recover messenger)]
       (do
+       (println "Poll recover next, output")
        (m/next-epoch! messenger)
        ;; output doesn't need to ack the recover barrier
        (m/unblock-subscriptions! messenger)

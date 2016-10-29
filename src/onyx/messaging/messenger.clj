@@ -26,6 +26,7 @@
   (add-subscription [messenger sub])
   (update-subscriptions [messenger sub-infos])
   (remove-subscription [messenger sub])
+  ;; TODO, make it add publications
   (add-publication [messenger pub])
   (remove-publication [messenger pub])
   (ticket-counters [messenger])
@@ -35,6 +36,8 @@
   (get-ticket [messenger sub-info])
   (poll [messenger])
   (poll-recover [messenger])
+  (poll-heartbeats [messenger])
+  (offer-heartbeats [messenger])
   (offer-segments [messenger messages task-slots])
   (offer-barrier [messenger publication] [messenger publication barrier-opts])
   (unblock-subscriptions! [messenger])

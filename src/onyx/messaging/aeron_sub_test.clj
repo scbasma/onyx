@@ -52,10 +52,14 @@
              :read (atom [])}
         handler (FragmentAssembler. 
                  (FragHandler. (fn [buffer offset length header]
+                                 (println "Polled position" (.position header))
                                  (handle-message sub buffer offset length header))))]
     (assoc sub :handler handler)))
 
 (defn close-sub! [sub-info]
+  (println "Closing sub" (.images (:subscription sub-info)))
+  (while (not (empty? (.images (:subscription sub-info))))
+    (println "Burning while still images"))
   (.close ^Subscription (:subscription sub-info))
   (.close (:conn sub-info)))
 
@@ -103,7 +107,7 @@
         buf ^UnsafeBuffer (UnsafeBuffer. payload)]
     (let [ret (.offer ^Publication (:publication pub) buf 0 (.capacity buf))]
       (when (pos? ret)
-        ;(println "ret" ret (:id message))
+        (println "ret" ret (:id message))
         ;(println "size" (alength payload))
         ;; Offer successful, track what was sent
         (swap! (:sent pub) conj (:id message))))))
@@ -111,34 +115,62 @@
 (defn try-run []
   (let [media-driver (component/start (->EmbeddedMediaDriver))]
     (try
-     (dotimes [stream-id 10000] 
-       (let [n-subscribers (rand-int 15)
-             n-publishers 15
-             subs (mapv (fn [i] (new-subscription stream-id))
-                        (range (inc n-subscribers)))
+     (dotimes [stream-id 1] 
+       (let [n-subscribers 1
+             n-publishers 1
+             subs (atom (mapv (fn [i] (new-subscription stream-id))
+                              (range n-subscribers)))
              pubs (mapv (fn [i] (new-publication stream-id))
                         (range n-publishers))]
          (Thread/sleep 2000)
          (try
-          (dotimes [i 10000]
+          (dotimes [i 100]
             (when true ;(zero? (rand-int 10)) 
               (offer-message! (first pubs) {:id i :rand-str (apply str (repeatedly 200 #(rand-int 10000)))}))
+            #_(dotimes [j 100] 
+              (run! (fn [sub] 
+                      (when true
+                        (poll! sub))) 
+                    @subs)))
+
+          (println "Closed sub")
+          (close-sub! (first @subs))
+          (println "Reopening")
+
+          (dotimes [i 100]
+            (when true ;(zero? (rand-int 10)) 
+              (offer-message! (first pubs) {:id i :rand-str (apply str (repeatedly 200 #(rand-int 10000)))}))
+            (dotimes [j 100] 
+              (run! (fn [sub] 
+                      (when true
+                        (poll! sub))) 
+                    @subs))
+            )
+
+          #_(reset! subs 
+                  (mapv (fn [i] (new-subscription stream-id))
+                        (range (inc n-subscribers))))
+
+          #_(dotimes [i 100]
+              (when true ;(zero? (rand-int 10)) 
+                (offer-message! (first pubs) {:id i :rand-str (apply str (repeatedly 200 #(rand-int 10000)))}))
             ;; sometimes poll
-            (run! (fn [sub] 
+            #_(run! (fn [sub] 
                     (when true ;(zero? (rand-int 5)) 
                       (poll! sub))) 
                   subs))
 
-          (dotimes [i 100000]
+
+          #_(dotimes [i 100000]
             (run! (fn [sub] 
                     (when (zero? (rand-int 50)) 
                       (poll! sub))) 
                   subs))
 
-          (Thread/sleep 500)
+          #_(Thread/sleep 500)
 
           ;; Try to flush the rest
-          (dotimes [i 10000000]
+          #_(dotimes [i 10000000]
             (run! poll! subs))
 
           ;(Thread/sleep 2000)
@@ -146,7 +178,7 @@
           ;; Try to flush the rest again
           ; (dotimes [i 10000000]
           ;   (run! poll! subs))
-          (let [sent-missing (mapv (fn [sub] (sort (vec (clojure.set/difference (set @(:sent (first pubs)))
+          #_(let [sent-missing (mapv (fn [sub] (sort (vec (clojure.set/difference (set @(:sent (first pubs)))
                                                                                 (set (map first @(:read sub)))))))
 
                                    subs)]
@@ -159,7 +191,7 @@
                           sent-missing)))
           (finally 
            (run! close-pub! pubs)
-           (run! close-sub! subs)))))
+           (run! close-sub! @subs)))))
      (finally
       (component/stop media-driver)))))
 

@@ -133,15 +133,6 @@
   true
   #_(empty? (:aligned sub-ticket)))
 
-(defn is-next-barrier? [replica-version epoch barrier]
-  (and (= replica-version (:replica-version barrier))
-       (= (inc epoch) (:epoch barrier))))
-
-(defn found-next-barrier? [messenger {:keys [barrier] :as subscriber}]
-  (let [barrier-val @barrier] 
-    (and (is-next-barrier? (m/replica-version messenger) (m/epoch messenger) barrier-val) 
-         (not (:emitted? barrier-val)))))
-
 (defn unblocked? [messenger {:keys [barrier] :as subscriber}]
   (let [barrier-val @barrier] 
     (and (= (m/replica-version messenger) (:replica-version barrier-val))
@@ -153,6 +144,13 @@
   (set-ticket [this new-ticket])
   (set-replica-version! [this new-replica-version])
   (set-epoch! [this new-epoch])
+  (block! [this])
+  (unblock! [this])
+  (blocked? [this])
+  ;; REMOVE
+  (get-recover [this])
+  ;; REMOVE
+  (reset-recover! [this])
   (get-batch [this]))
 
 (defn action->kw [action]
@@ -166,8 +164,9 @@
         :COMMIT))
   
 (deftype RecoverFragmentHandler [src-peer-id dst-task-id 
-                                 barrier 
-                                 ;^:unsynchronized-mutable aligned ^:unsynchronized-mutable ticket 
+                                 ;; REMOVE
+                                 ^:unsynchronized-mutable recover
+                                 ^:unsynchronized-mutable blocked
                                  ^:unsynchronized-mutable replica-version ^:unsynchronized-mutable epoch]
   PartialSubscriber
   (set-replica-version! [this new-replica-version]
@@ -178,6 +177,11 @@
     this)
   (init [this]
     this)
+  (get-recover [this] recover)
+  (reset-recover! [this] (set! recover nil))
+  (blocked? [this] blocked)
+  (block! [this] (set! blocked true))
+  (unblock! [this] (set! blocked false))
   ControlledFragmentHandler
   (onFragment [this buffer offset length header]
     (let [ba (byte-array length)
@@ -192,12 +196,22 @@
                          (= rv-msg replica-version))
                     ControlledFragmentHandler$Action/CONTINUE
 
-                    (and (barrier? message)
-                         (is-next-barrier? replica-version epoch message))
+                    (and 
+                     ;; Remove
+                     (barrier? message)
+                     
+                     (= rv-msg replica-version)
+                         ;; allow greater later
+                         (= (:epoch message) (inc epoch)))
                     (do 
-                     (println "Setting barrier" message)
-                     (reset! barrier message)
-                     ControlledFragmentHandler$Action/BREAK)
+                     (block! this)
+                     (set! recover (:recover message))
+                     (cond (barrier? message) 
+                           ControlledFragmentHandler$Action/BREAK
+                           (message? message)
+                           ControlledFragmentHandler$Action/ABORT
+                           :else
+                           (throw (Exception. "ut oh"))))
 
                     :else
                     ControlledFragmentHandler$Action/ABORT)]
@@ -207,8 +221,8 @@
 
 ;; TODO, can skip everything if it's the wrong image completely
 (deftype ReadSegmentsFragmentHandler 
-  [src-peer-id dst-task-id barrier 
-   ^:unsynchronized-mutable ticket ^:unsynchronized-mutable batch 
+  [src-peer-id dst-task-id 
+   ^:unsynchronized-mutable blocked ^:unsynchronized-mutable ticket ^:unsynchronized-mutable batch 
    ^:unsynchronized-mutable replica-version ^:unsynchronized-mutable epoch]
   PartialSubscriber
   (set-replica-version! [this new-replica-version]
@@ -225,9 +239,15 @@
     this)
   (get-batch [this]
     (persistent! batch))
+  (blocked? [this] blocked)
+  (block! [this] 
+    (set! blocked true))
+  (unblock! [this] 
+    (set! blocked false))
   ControlledFragmentHandler
   (onFragment [this buffer offset length header]
     ;(println "ON FRAGMENT " ticket)
+    (assert (not blocked))
     (let [ba (byte-array length)
           _ (.getBytes ^UnsafeBuffer buffer offset ba)
           message (messaging-decompress ba)
@@ -251,7 +271,8 @@
                     ControlledFragmentHandler$Action/ABORT
 
                     (and (message? message)
-                         (not (nil? @barrier))
+                         (= replica-version (:replica-version message))
+                         (= epoch (:epoch message))
                          (< ticket-val position))
                     (do 
                      (assert (= replica-version rv-msg))
@@ -260,22 +281,34 @@
                      ;; WORK OUT ON PAPER
                      (when true ;(compare-and-set! ticket ticket-val position)
                        (do 
-                        (assert (coll? (:payload message)))
-                        (reduce conj! batch (:payload message))))
+                        (reduce conj! batch (:payload message))
+                        (assert (coll? (:payload message)))))
                      ControlledFragmentHandler$Action/CONTINUE)
 
-                    (and (barrier? message)
-                         (is-next-barrier? replica-version epoch message))
-                    (do
-                     ;(println "Got barrier " message)
-                     (if (zero? (count batch)) ;; empty? broken on transients
-                       (do 
-                        (reset! barrier message)
-                        ControlledFragmentHandler$Action/BREAK)  
-                       ControlledFragmentHandler$Action/ABORT))
+                    ;; Should only be used with messages when sharing a slot id
+                    ;; Add assertion check here
+                    (and 
+                     ;; Should allow non barriers to allow messages to fill me in
+                     (barrier? message)
+
+                     (= replica-version (:replica-version message))
+                     ;; allow to be greater later
+                     (= (:epoch message) (inc epoch)))
+                    (if (zero? (count batch)) ;; empty? broken on transients
+                      (do 
+                       (println "Blocking again thanks to " message "with" replica-version epoch)
+                       (block! this) 
+                       (if (barrier? message) 
+                         ControlledFragmentHandler$Action/BREAK
+                         ;; Allows us to skip over a barrier and still block correctly
+                         ControlledFragmentHandler$Action/ABORT))
+                      ControlledFragmentHandler$Action/ABORT)
+
+                    (message? message)
+                    ControlledFragmentHandler$Action/ABORT
 
                     :else
-                    (throw (Exception. (str "Should not happen? " ticket-val " " position " " replica-version " " epoch))))]
+                    (throw (Exception. (str "Should not happen? " ticket-val " " position " " replica-version " " epoch " vs " (into {} message)))))]
       (println [:handle-message (action->kw ret) dst-task-id src-peer-id] (.position header) message)
       ;(add-tracked-message! messenger dst-task-id src-peer-id message ret [:handle-message dst-task-id src-peer-id])
       ret)))
@@ -309,53 +342,48 @@
    :sub-info (select-keys sub-info [:src-peer-id :dst-task-id :slot-id :site])])
 
 (defn poll-messages! [messenger sub-info]
-  (let [{:keys [src-peer-id dst-task-id subscription aligned-peers]} sub-info
-        ;sub-ticket (m/get-ticket messenger sub-info)
-        ]
+  (let [{:keys [src-peer-id dst-task-id subscription aligned-peers]} sub-info]
     (println "poll-messages!:" (sub-info-meta messenger sub-info))
     ;; May not need to check for alignment here, can prob just do in :recover
-    (if ;and (subscription-aligned? sub-ticket)
-      (unblocked? messenger sub-info)
-      (let [handler (-> sub-info
-                        :segments-handler
-                        (init))
-            assembler (:segments-assembler sub-info)
-            images (.images ^Subscription subscription)]
-        (run! (fn [img]
-                (let [;; rationalise
-                      image-aligned (get-in @(m/ticket-counters messenger) [(.correlationId img) :aligned])
-                      ticket (get-in @(m/ticket-counters messenger) [(.correlationId img) :ticket])] 
-                  (println (set aligned-peers) "vs" (clojure.set/intersection (set aligned-peers) (set image-aligned)))
-                  (if (= (set aligned-peers) 
-                         (clojure.set/intersection (set aligned-peers) (set image-aligned)))
-                    (.controlledPoll ^Image img 
-                                     ^ControlledFragmentHandler (set-ticket assembler ticket)
-                                     fragment-limit-receiver)
-                    (println "Polling not aligned"))))
-              images)
-        (let [batch (get-batch handler)]
-          (println "polled batch:" batch)
-          batch))
-      [])))
+    ;; Make this a function of the segments-handler?
+    (let [handler (-> sub-info
+                      :segments-handler
+                      (init))
+          assembler (:segments-assembler sub-info)
+          images (.images ^Subscription subscription)]
+      ;; Possibly should poll other images that we're not interested in still
+      (if-not (blocked? handler) 
+        (do (run! (fn [img]
+                    (let [ticket (get-in @(m/ticket-counters messenger) [(.correlationId img) :ticket])] 
+                      (.controlledPoll ^Image img 
+                                       ^ControlledFragmentHandler (set-ticket assembler ticket)
+                                       fragment-limit-receiver)))
+                  images)
+            (let [batch (get-batch handler)]
+              (println "polled batch:" batch)
+              batch))
+        []))))
 
 (defn poll-new-replica! [messenger sub-info]
-  (let [{:keys [src-peer-id dst-task-id subscription barrier aligned-peers]} sub-info]
-    (println "poll-new-replica!, before:" (.id messenger) (sub-info-meta messenger sub-info))
-    (let [recover-handler (-> sub-info
-                              :recover-handler
-                              init)
-          assembler (:recover-assembler sub-info)
-          images (.images ^Subscription subscription)]
+  (let [{:keys [src-peer-id dst-task-id subscription barrier aligned-peers]} sub-info
+        _ (println "Poll replica")
+        _ (println "poll-new-replica!, before:" (.id messenger) (sub-info-meta messenger sub-info))
+        recover-handler (-> sub-info
+                            :recover-handler
+                            init)
+        assembler (:recover-assembler sub-info)
+        images (.images ^Subscription subscription)]
+    (when-not (blocked? recover-handler) 
       (run! (fn [img]
-              (let [image-aligned (get-in @(m/ticket-counters messenger) [(.correlationId img) :aligned])] 
-                (println (set aligned-peers) "vs" (clojure.set/intersection (set aligned-peers) (set image-aligned)))
-                (if (= (set aligned-peers) 
-                       (clojure.set/intersection (set aligned-peers) (set image-aligned)))
-                  (do
-                   (println "polling image id " (.correlationId img))
-                   (.controlledPoll ^Image img ^ControlledFragmentHandler assembler fragment-limit-receiver))
-                  (println "Polling replica not aligned."))))
-            images))
+              (.controlledPoll ^Image img ^ControlledFragmentHandler assembler fragment-limit-receiver))
+            images)
+      (println "Checking" sub-info "blocked?" (blocked? (:segments-handler sub-info)))
+      ;; blocking segment handler?
+      ;(block! (:recover-handler sub-info))
+      (when (blocked? recover-handler)
+        (assert (blocked? (:segments-handler sub-info)))
+        (println "Unblocking" sub-info)
+        (unblock! (:segments-handler sub-info))))
     (println "poll-new-replica!, after" (.id messenger) (sub-info-meta messenger sub-info))))
 
 (defn handle-drain
@@ -409,9 +437,9 @@
         stream (stream-id job-id dst-task-id slot-id site src-peer-id)
         subscription (.addSubscription conn channel stream)
         barrier (atom nil)
-        recover-fragment-handler (RecoverFragmentHandler. src-peer-id dst-task-id barrier nil nil)
+        recover-fragment-handler (RecoverFragmentHandler. src-peer-id dst-task-id nil nil nil nil)
         recover-assembler (ControlledFragmentAssembler. recover-fragment-handler)
-        segments-fragment-handler (ReadSegmentsFragmentHandler. src-peer-id dst-task-id barrier nil nil nil nil)
+        segments-fragment-handler (ReadSegmentsFragmentHandler. src-peer-id dst-task-id nil nil nil nil nil)
         segments-assembler (ControlledFragmentAssembler. segments-fragment-handler)
         sub-info (assoc sub-info
                         :subscription subscription 
@@ -422,7 +450,6 @@
                         :segments-handler segments-fragment-handler
                         :segments-assembler segments-fragment-handler
                         :barrier barrier)]
-    (assert (not (empty? (:aligned-peers sub-info))))
     (println "New sub:" (sub-info-meta messenger sub-info))
     sub-info))
 
@@ -620,13 +647,16 @@
     (set! read-index 0)
     ; unblock subscriptions
     (println "Subscriptions" subscriptions)
-    (run! (fn [sub] (reset! (:barrier sub) nil)) subscriptions)
-    (run! (fn [sub]
-            (set-replica-version! (:segments-handler sub) rv)
-            (set-replica-version! (:recover-handler sub) rv)) 
-          subscriptions)
+    ;(run! (fn [sub] (reset! (:barrier sub) nil)) subscriptions)
     (set! replica-version rv)
     (m/set-epoch! messenger 0)
+    (run! (fn [sub]
+            (reset-recover! (:recover-handler sub))
+            (unblock! (:recover-handler sub))
+            (set-replica-version! (:recover-handler sub) rv)
+            (block! (:segments-handler sub))
+            (set-replica-version! (:segments-handler sub) rv)) 
+          subscriptions)
     (reduce m/register-ticket messenger subscriptions))
 
   (replica-version [messenger]
@@ -636,7 +666,11 @@
     epoch)
 
   (set-epoch! [messenger e]
+    (println "Set epoch" id replica-version e epoch)
     (run! (fn [sub]
+            (println "Unblockign segment handler")
+            ;; FIXME, interacts with set-replica-version badly. Maybe don't unblock here
+            (unblock! (:segments-handler sub))
             (set-epoch! (:segments-handler sub) e)
             (set-epoch! (:recover-handler sub) e)) 
           subscriptions)
@@ -644,6 +678,7 @@
     messenger)
 
   (next-epoch! [messenger]
+    (println "Next epoch" id)
     (m/set-epoch! messenger (inc epoch)))
 
   (poll [messenger]
@@ -660,7 +695,7 @@
     ;; Possibly should try more than one iteration before returning
     ;; TODO: should re-use unsafe buffers in aeron messenger. 
     ;; Will require nippy to be able to write directly to unsafe buffers
-    (let [message (->Message id dst-task-id slot-id (m/replica-version messenger) batch)
+    (let [message (->Message id dst-task-id slot-id replica-version epoch batch)
           payload ^bytes (messaging-compress message)
           buf ^UnsafeBuffer (UnsafeBuffer. payload)] 
       ;; shuffle publication order to ensure even coverage. FIXME: slow
@@ -677,14 +712,12 @@
     (loop [sbs subscriptions]
       (let [sub (first sbs)] 
         (when sub 
-          (if-not @(:barrier sub)
-            (poll-new-replica! messenger sub)
-            (println "poll-recover!," id " has barrier, skip:" (sub-info-meta messenger sub)))
+          (poll-new-replica! messenger sub) 
           (recur (rest sbs)))))
     (debug "Seen all subs?: " (m/all-barriers-seen? messenger) :subscriptions (mapv sub-info-meta subscriptions))
     (if (m/all-barriers-seen? messenger)
-      (let [recover (:recover @(:barrier (first subscriptions)))] 
-        (assert (= 1 (count (set (map (comp :recover deref :barrier) subscriptions)))))
+      (let [recover (get-recover (:recover-handler (first subscriptions)))] 
+        (println "Recover" recover)
         (assert recover)
         recover)))
 
@@ -703,17 +736,33 @@
         (println "Offer barrier:" [:ret ret :message barrier :pub (pub-info-meta messenger pub-info)])
         ret)))
 
+  ;; FIXME REMOVE OR RATIONALISE
   (unblock-subscriptions! [messenger]
-    (run! set-barrier-emitted! subscriptions)
+    ;(run! (comp block! :segments-handler) subscriptions)
     messenger)
 
+  ;; rename - all subscriptions-blocked?
   (all-barriers-seen? [messenger]
-    (empty? (remove #(found-next-barrier? messenger %) 
-                    subscriptions)))
+    ;; Simplify after recover is done
+    (mapv (fn [s]
+            (assert (or (not (blocked? (:recover-handler s)))
+                        (get-recover (:recover-handler s)))))
+            subscriptions)
+    (println "Blockage"
+             (empty? (remove #(blocked? (:recover-handler %)) 
+                             subscriptions))
+             (empty? (filter #(blocked? (:segments-handler %)) 
+                     subscriptions))   
+             )
+    (and (empty? (remove #(blocked? (:recover-handler %)) 
+                         subscriptions))
+         (empty? (filter #(blocked? (:segments-handler %)) 
+                         subscriptions))))
 
   (all-barriers-completed? [messenger]
-    (empty? (remove (fn [sub] (:completed? @(:barrier sub)))
-                    subscriptions))))
+    (println "all bompleted?"
+             false)
+    false))
 
 (defmethod m/build-messenger :aeron [peer-config messenger-group id]
   (->AeronMessenger messenger-group id (:ticket-counters messenger-group) -1 -1 nil nil 0))
