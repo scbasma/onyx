@@ -255,11 +255,12 @@
                                                :peer-owners {}
                                                :vpeers {}})
                      (info "Dropping out of Peer Group Manager loop"))]
-      (assoc component :thread-ch thread-ch :group-ch group-ch :shutdown-ch shutdown-ch)))
+      (assoc component :started? true :thread-ch thread-ch :group-ch group-ch :shutdown-ch shutdown-ch)))
   (stop [component]
-    (close! (:shutdown-ch component))
-    (<!! (:thread-ch component))
-    (assoc component :thread-ch nil :group-ch nil :shutdown-ch nil)))
+    (when (:started? component)
+      (close! (:shutdown-ch component))
+      (<!! (:thread-ch component)))
+    (assoc component :started? false :thread-ch nil :group-ch nil :shutdown-ch nil)))
 
 (defn peer-group-manager [peer-config onyx-vpeer-system-fn]
   (->PeerGroupManager peer-config onyx-vpeer-system-fn))

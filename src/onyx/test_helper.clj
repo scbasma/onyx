@@ -88,24 +88,28 @@
 
 (defn try-start-env [env-config]
   (try
-    (onyx.api/start-env env-config)
-    (catch InterruptedException e)
-    (catch Throwable e
-      (throw e))))
+   (onyx.api/start-env env-config)
+   (catch Throwable e
+     (println "Try to stop again?")
+     (when-let [system (:system (ex-data e))] 
+       (component/stop system))
+     (throw e))))
 
 (defn try-start-group [peer-config]
   (try
     (onyx.api/start-peer-group peer-config)
-    (catch InterruptedException e)
     (catch Throwable e
+     (when-let [system (:system (ex-data e))] 
+       (component/stop system))
       (throw e))))
 
 (defn try-start-peers 
   [n-peers peer-group]
   (try
    (onyx.api/start-peers n-peers peer-group)
-   (catch InterruptedException e)
    (catch Throwable e
+     (when-let [system (:system (ex-data e))] 
+       (component/stop system))
      (throw e))))
 
 (defn add-test-env-peers! 
@@ -143,12 +147,12 @@
   (assert (even? (count bindings)))
   (if (empty? bindings)
     `(do ~@body)
-    (let [ [symbol-name value & rest] bindings]
+    (let [[symbol-name value & rest] bindings]
       `(let [~symbol-name ~value]
-         (try
-           (with-components ~(vec rest) ~@body)
-           (finally
-             (component/stop ~symbol-name)))))))
+         (try 
+          (with-components ~(vec rest) ~@body)
+          (finally
+           (component/stop ~symbol-name)))))))
 
 (defmacro with-test-env
   "Start a test env in a way that shuts down after body is completed.

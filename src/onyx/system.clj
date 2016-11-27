@@ -12,7 +12,7 @@
             [onyx.messaging.messenger-buffer :as buffer]
             [onyx.monitoring.no-op-monitoring]
             [onyx.monitoring.custom-monitoring]
-            [onyx.log.zookeeper :refer [zookeeper]]
+            [onyx.log.zookeeper :refer [zookeeper-server zookeeper]]
             [onyx.query :as qs]
             [onyx.static.validation :as validator]
             [onyx.state.bookkeeper :refer [multi-bookie-server]]
@@ -60,7 +60,7 @@
 ;; Increase default core.async thread poll size to avoid blocking issues due to alts!!
 (System/setProperty "clojure.core.async.pool-size" (or (System/getProperty "clojure.core.async.pool-size") "32"))
 
-(def development-components [:monitoring :logging-config :log :bookkeeper])
+(def development-components [:monitoring :logging-config :log :zookeeper-server :bookkeeper])
 
 (def peer-group-components [:logging-config :monitoring :query-server :messaging-group :peer-group-manager])
 
@@ -86,7 +86,7 @@
     (f)
     (catch Throwable e
       (fatal e)
-      (throw (.getCause e)))))
+      (throw e))))
 
 (defrecord OnyxDevelopmentEnv []
   component/Lifecycle
@@ -141,7 +141,8 @@
     {:monitoring (extensions/monitoring-agent monitoring-config)
      :logging-config (logging-config/logging-configuration peer-config)
      :bookkeeper (component/using (multi-bookie-server peer-config) [:log])
-     :log (component/using (zookeeper peer-config) [:monitoring :logging-config])}))
+     :zookeeper-server (component/using (zookeeper-server peer-config) [:monitoring :logging-config])
+     :log (component/using (zookeeper peer-config) [:monitoring :zookeeper-server])}))
 
 (defn onyx-client
   [{:keys [monitoring-config]

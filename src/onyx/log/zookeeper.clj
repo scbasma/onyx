@@ -89,15 +89,38 @@
            bytes (zookeeper-compress {:message-id -1 :replica replica/base-replica})]
        (zk/create conn node :data bytes :persistent? true)))))
 
+(defrecord ZooKeeperServer [config]
+  component/Lifecycle
+
+  (start [component]
+    (s/validate os/PeerClientConfig config)
+    (taoensso.timbre/info "Starting ZooKeeper server")
+    (BasicConfigurator/configure)
+    (let [server (when (:zookeeper/server? config) (TestingServer. (int (:zookeeper.server/port config))))]
+      (assoc component :server server)))
+
+  (stop [component]
+    (taoensso.timbre/info "Stopping ZooKeeper server")
+    (when (:server component)
+      (println "Closing testing server" (:server component))
+      (.close ^TestingServer (:server component)))
+    component))
+
+(defmethod clojure.core/print-method ZooKeeperServer
+  [system ^java.io.Writer writer]
+  (.write writer "#<ZooKeeperServer Component>"))
+
+(defn zookeeper-server [config]
+  (map->ZooKeeperServer {:config config}))
+
 (defrecord ZooKeeper [config]
   component/Lifecycle
 
   (start [component]
     (s/validate os/PeerClientConfig config)
-    (taoensso.timbre/info "Starting ZooKeeper" (if (:zookeeper/server? config) "server" "client connection. If Onyx hangs here it may indicate a difficulty connecting to ZooKeeper."))
+    (taoensso.timbre/info "Starting ZooKeeper client connection. If Onyx hangs here it may indicate a difficulty connecting to ZooKeeper.")
     (BasicConfigurator/configure)
     (let [onyx-id (:onyx/tenancy-id config)
-          server (when (:zookeeper/server? config) (TestingServer. (int (:zookeeper.server/port config))))
           conn (zk/connect (:zookeeper/address config))
           kill-ch (chan)]
       (zk/create conn root-path :persistent? true)
@@ -120,17 +143,14 @@
       (zk/create conn (exception-path onyx-id) :persistent? true)
 
       (initialize-origin! conn config onyx-id)
-      (assoc component :server server :conn conn :prefix onyx-id :kill-ch kill-ch)))
+      (assoc component :conn conn :prefix onyx-id :kill-ch kill-ch :started? true)))
 
   (stop [component]
-    (taoensso.timbre/info "Stopping ZooKeeper" (if (:zookeeper/server? config) "server" "client connection"))
-    (zk/close (:conn component))
-    (close! (:kill-ch component))
-
-    (when (:server component)
-      (.close ^TestingServer (:server component)))
-
-    component))
+    (taoensso.timbre/info "Stopping ZooKeeper client connection")
+    (when (:started? component)
+      (zk/close (:conn component))
+      (close! (:kill-ch component)))
+    (assoc component :conn nil :prefix nil :kill-ch nil :started? false?)))
 
 (defmethod clojure.core/print-method ZooKeeper
   [system ^java.io.Writer writer]
