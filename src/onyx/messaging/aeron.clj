@@ -350,7 +350,7 @@
           (persistent! segments) 
           (do
            ;; less than the resolution for alts!!
-           (Thread/sleep 5)
+           (Thread/sleep 50)
            (recur segments i)))))))
 
 (defn lookup-channels [messenger id]
