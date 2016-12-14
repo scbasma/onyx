@@ -103,7 +103,6 @@
   [state]
   {:post [(empty? (:batch (:event %)))
           (empty? (:segments (:results (:event %))))]}
-  ;; FIXME REMOVE
   (-> state 
       (set-context! nil)
       (init-event!)
@@ -406,35 +405,30 @@
 
 (defn iteration [state-machine replica]
   (when DEBUG (viz/update-monitoring! state-machine))
-  (if (killed? state-machine)
-    state-machine
-    (loop [sm (if-not (= (get-replica state-machine) replica)
-                (next-replica! state-machine replica)
-                state-machine)]
-      (let [next-sm (exec sm)]
-        ;(println "State after exec?")
-        (when DEBUG (print-state sm))
-        ;(println "Next state for loop. advanced:" (advanced? sm) "new iter" (new-iteration? sm))
-        (if (and (advanced? sm) 
-                 (not (new-iteration? sm)))
-          (recur next-sm)
-          ;; Blocked for some reason
-          (do
-           (Thread/sleep 5)
-           ;; TODO REMOVE?
-           (info "Polling heartbeats because blocked, keep things going")
-           (run! pub/poll-heartbeats! (m/publishers (get-messenger sm)))
-           next-sm))))))
+  (loop [sm (if-not (= (get-replica state-machine) replica)
+              (next-replica! state-machine replica)
+              state-machine)]
+    (let [next-sm (exec sm)]
+      (when DEBUG (print-state sm))
+      ;(println "Next state for loop. advanced:" (advanced? sm) "new iter" (new-iteration? sm))
+      (if (and (advanced? sm) 
+               (not (new-iteration? sm)))
+        (recur next-sm)
+        ;; Blocked for some reason
+        (do
+         ;; TODO REMOVE?
+         (Thread/sleep 5)
+         (info "Polling heartbeats because blocked, keep things going")
+         (run! pub/poll-heartbeats! (m/publishers (get-messenger sm)))
+         next-sm)))))
 
 (defn run-task-lifecycle
   "The main task run loop, read batch, ack messages, etc."
   [state-machine ex-f]
   (try
-    (let [{:keys [task-information replica-atom opts state]} (get-event state-machine)] 
+    (let [{:keys [replica-atom]} (get-event state-machine)] 
       (loop [sm state-machine 
              replica-val @replica-atom]
-        ;; TODO add here :offer-barriers, emit-ack-barriers?
-        ;(println "Iteration " (:state prev-state))
         (info "New task iteration:" (:task-type (get-event sm)))
         (let [next-sm (iteration sm replica-val)]
           (if-not (killed? next-sm)
@@ -659,7 +653,8 @@
     (let [job-id (get event :job-id)
           old-version (get-in replica [:allocation-version job-id])
           new-version (get-in new-replica [:allocation-version job-id])]
-      (if (= old-version new-version)
+      (if (or (= old-version new-version)
+              (killed? this))
         this
         (let [next-messenger (ms/next-messenger-state! messenger event replica new-replica)
               ;; Coordinator must be transitioned before recovery, as the coordinator
@@ -760,7 +755,7 @@
 
 (defrecord TaskLifeCycle
   [id log messenger messenger-group job-id task-id replica group-ch log-prefix
-   kill-flag outbox-ch seal-ch completion-ch peer-group opts task-kill-flag
+   kill-flag outbox-ch completion-ch peer-group opts task-kill-flag
    scheduler-event task-monitoring task-information]
   component/Lifecycle
 

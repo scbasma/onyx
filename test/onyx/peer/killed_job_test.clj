@@ -141,7 +141,6 @@
                            :lifecycles lifecycles-2
                            :task-scheduler :onyx.task-scheduler/balanced}))]
         (onyx.api/kill-job peer-config j1)
-        (onyx.test-helper/feedback-exception! peer-config j2)
         (let [results (take-segments! @out-chan-2 50)
               ch (chan 100)]
           ;; Make sure we find the killed job in the replica, then bail
@@ -150,6 +149,6 @@
                   new-replica (extensions/apply-log-entry entry replica)]
               (when-not (= (first (:killed-jobs new-replica)) j1)
                 (recur new-replica))))
-
-          (let [expected (set (map (fn [x] {:n (inc x)}) (range n-messages)))]
-            (is (= expected (set results))))))))))
+        (onyx.test-helper/feedback-exception! peer-config j2)
+        (let [expected (set (map (fn [x] {:n (inc x)}) (range n-messages)))]
+          (is (= expected (set results))))))))))

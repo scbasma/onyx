@@ -163,14 +163,12 @@
          ;; Signal that peer is done
          (stop-lifecycle-safe! (:lifecycle-stop-fn state) scheduler-event state))
        (if (not (nil? new-allocation))
-         (let [seal-ch (chan)
-               internal-kill-flag (atom false)
+         (let [internal-kill-flag (atom false)
                external-kill-flag (atom false)
                peer-site (get-in new [:peer-sites (:id state)])
                task-state {:job-id (:job new-allocation)
                            :task-id (:task new-allocation)
                            :peer-site peer-site
-                           :seal-ch seal-ch
                            :kill-flag external-kill-flag
                            :task-kill-flag internal-kill-flag}
                lifecycle (assoc-in ((:task-component-fn state) state task-state)
