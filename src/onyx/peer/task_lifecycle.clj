@@ -433,7 +433,9 @@
         (let [next-sm (iteration sm replica-val)]
           (if-not (killed? next-sm)
             (recur next-sm @replica-atom)
-            next-sm))))
+            (do
+             (println "Fell out of task lifecycle loop")
+             next-sm)))))
    (catch Throwable e
      (ex-f e state-machine)
      state-machine)))
@@ -840,15 +842,19 @@
 
     (when-let [event (:event component)]
       ;; Ensure task operations are finished before closing peer connections
+      (println "Killing waiting to fall out")
       (reset! (:kill-flag component) true)
-
       (when-let [last-state (final-state component)]
+        ;;;;; FIXME FIXME FIXME LIFECYCLE ISSUES HERE
+        ;;;;; WE NEED TASK LIFECYLCE LOOP DO THE SHUTDOWN
+        ;;;;; MIGHT AS WELL DO THE STARTUP TOO
         (stop last-state)
         (when-not (empty? (:triggers (get-event last-state)))
           (ws/assign-windows last-state (:scheduler-event component)))
 
         (reset! (:task-kill-flag component) true)
 
+        ;; Move these compiled versions to outside of event
         ((:compiled-after-task-fn event) event)))
 
     (assoc component

@@ -196,6 +196,7 @@
 (defmethod action :apply-log-entry [{:keys [replica group-state comm peer-config vpeers] :as state} [type entry]]
   (try 
    (let [new-replica (extensions/apply-log-entry entry (assoc replica :version (:message-id entry))) 
+         _ (println "new replica" new-replica)
          diff (extensions/replica-diff entry replica new-replica)
          tgroup (transition-group entry replica new-replica diff group-state)
          tpeers (transition-peers (:log comm) entry replica new-replica diff peer-config vpeers)
