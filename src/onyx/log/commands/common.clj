@@ -171,9 +171,9 @@
                            :peer-site peer-site
                            :kill-flag external-kill-flag
                            :task-kill-flag internal-kill-flag}
-               lifecycle (assoc-in ((:task-component-fn state) state task-state)
-                                   [:task-lifecycle :scheduler-event]
-                                   scheduler-event)
+               lifecycle (-> ((:task-component-fn state) state task-state)
+                             (assoc-in [:task-lifecycle :scheduler-event] scheduler-event)
+                             (assoc-in [:task-lifecycle :replica-origin] new))
                started-task-ch (start-task! lifecycle)
                lifecycle-stop-fn (build-stop-task-fn external-kill-flag started-task-ch)]
            (assoc state
