@@ -34,19 +34,19 @@
    []
    ingress-tasks))
 
-(defn peer-slot-id 
-  [event]
-  (let [replica (:replica event)
-        job-id (:job-id event)
-        peer-id (:id event)
-        task-id (:task-id event)] 
-    (get-in @replica [:task-slot-ids job-id task-id peer-id])))
+; (defn peer-slot-id 
+;   [event]
+;   (let [replica (:replica event)
+;         job-id (:job-id event)
+;         peer-id (:id event)
+;         task-id (:task-id event)] 
+;     (get-in @replica [:task-slot-ids job-id task-id peer-id])))
 
 (defn job->peers [replica]
-  (reduce-kv
-   (fn [all job tasks]
-     (assoc all job (reduce into [] (vals tasks))))
-   {} (:allocations replica)))
+  (reduce-kv (fn [all job tasks]
+               (assoc all job (reduce into [] (vals tasks))))
+             {} 
+             (:allocations replica)))
 
 (defn replica->job-peers [replica job-id]
   (apply concat (vals (get-in replica [:allocations job-id]))))
