@@ -826,7 +826,6 @@
            task-map (:task-map event)
            ;; stop, and put through handle
            pipeline (build-pipeline task-map event)
-           _ (println "replica origin" replica-origin)
            ;; stop, and put through handle
            coordinator (coordinator/new-peer-coordinator log messenger-group opts id job-id group-ch)
            initial-state (new-state-machine event opts messenger messenger-group coordinator pipeline)
