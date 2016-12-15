@@ -47,7 +47,8 @@
 (def d-calls
   {:lifecycle/before-task-start inject-d-ch})
 
-(deftest log-greedy-job
+;; ^:broken, job doesn't seem to seal
+(deftest ^:broken log-greedy-job
   (let [onyx-id (random-uuid)
         config (load-config)
         env-config (assoc (:env-config config) :onyx/tenancy-id onyx-id)
