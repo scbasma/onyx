@@ -115,8 +115,8 @@
         triggers
         [{:trigger/window-id :collect-segments
           :trigger/refinement :onyx.refinements/accumulating
-          :trigger/on :onyx.triggers/timer
-          :trigger/period [1 :seconds]
+          :trigger/on :onyx.triggers/segment
+          :trigger/threshold [1 :elements]
           :trigger/sync ::update-atom!}]
 
         lifecycles

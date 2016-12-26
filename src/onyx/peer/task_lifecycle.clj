@@ -349,7 +349,7 @@
 ;   (Thread/sleep (arg-or-default :onyx.peer/drained-back-off (:peer-opts event))))
 
 (defn assign-windows [state]
-  (ws/assign-windows state :new-segment))
+  (advance (ws/assign-windows state :new-segment)))
 
 (defn build-lifecycle-invoke-fn [event lifecycle-kw]
   (if-let [f (lc/compile-lifecycle-functions event lifecycle-kw)]
@@ -400,8 +400,8 @@
     (-> state 
         (set-windows-state! recovered-windows)
         ;; Notify triggers that we have recovered our windows
-        ;; ws/assign-windows will auto advance
-        (ws/assign-windows :recovered))))
+        (ws/assign-windows :recovered)
+        (advance))))
 
 (defn poll-recover-input-function [state]
   (let [messenger (get-messenger state)
@@ -442,8 +442,8 @@
                  (next-replica! state-machine replica)
                  state-machine)]
     (let [next-state (exec state)]
-      (when (zero? (rand-int 10000)) 
-        (print-state next-state))
+      ;when (zero? (rand-int 10000)) 
+        (print-state next-state)
       (if (and (advanced? next-state) 
                (not (new-iteration? next-state)))
         (recur next-state)
@@ -802,6 +802,7 @@
   (let [base-replica (onyx.log.replica/starting-replica opts)
         lifecycles (filter :fn (filter-task-lifecycles event))
         names (mapv :lifecycle lifecycles)
+        _ (info "NAMES" (:onyx.core/task event) names)
         arr #^"[Lclojure.lang.IFn;" (into-array clojure.lang.IFn (map :fn lifecycles))
         recover-idx (int 0)
         iteration-idx (int (lookup-lifecycle-idx lifecycles :lifecycle/next-iteration))
