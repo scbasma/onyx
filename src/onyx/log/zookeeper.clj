@@ -672,7 +672,6 @@
        (fn []
          (let [node (latest-checkpoint-path tenancy-id job-id) 
                version (:version (zk/exists conn node))]
-           (println "WROTE TO" node)
            (if (nil? version)
              (zk/create-all conn node :persistent? true :data bytes)
              (zk/set-data conn node bytes version)))))

@@ -242,22 +242,34 @@
 ;     (cond-> 
 ;       advanced? (advance))))
 
+(defn seal-job! [state]
+  (let [messenger (get-messenger state)
+        {:keys [onyx.core/triggers]} (get-event state)]
+    (if (empty? triggers)
+      (set-sealed! state true)
+      (set-sealed! (ws/assign-windows state :job-completed) true))))
+
 (defn prepare-barrier-sync [state]
-  (let [messenger (get-messenger state)] 
-    (if (sub/blocked? (m/subscriber messenger))
+  (let [messenger (get-messenger state)
+        subscriber (m/subscriber messenger)] 
+    (if (sub/blocked? subscriber)
       (let [_ (m/next-epoch! messenger)
             e (m/epoch messenger)
             input? (= :input (:onyx/type (:onyx.core/task-map (get-event state))))
             pipeline (cond-> (get-input-pipeline state)
                        input? (oi/synced? e)
+                       ;; TODO, should be able to block and spin here
                        true second)
             completed? (if input? ;; use a different interface? then don't need to switch on this
                          (oi/completed? pipeline)
-                         (sub/completed? (m/subscriber messenger)))]
-        (-> state 
+                         (sub/completed? subscriber))
+            state* (if (and completed? (not (sealed? state)))
+                     (seal-job! state)
+                     state)]
+        (-> state* 
             (set-input-pipeline! pipeline)
             (set-context! {:barrier-opts {:completed? completed?}
-                           :src-peers (sub/src-peers (m/subscriber messenger))
+                           :src-peers (sub/src-peers subscriber)
                            :publishers (m/publishers messenger)})
             (advance)))
       (goto-next-batch! state))))
@@ -294,18 +306,20 @@
   (sub/unblock! (m/subscriber (get-messenger state)))
   (advance (set-context! state nil)))
 
-(defn complete-job! [state]
+(defn seal-output! [state]
   (let [messenger (get-messenger state)
-        {:keys [onyx.core/job-id onyx.core/task-id 
+        {:keys [onyx.core/job-id onyx.core/task-id
                 onyx.core/slot-id onyx.core/outbox-ch]} (get-event state)
         entry (entry/create-log-entry :seal-output 
                                       {:replica-version (m/replica-version messenger)
+                                       :epoch (m/epoch messenger)
                                        :job-id job-id 
                                        :task-id task-id
-                                       :slot-id slot-id})]
+                                       :slot-id slot-id})
+        next-state (seal-job! state)]
     (info "job completed:" job-id task-id (:args entry))
     (>!! outbox-ch entry)
-    (set-sealed! state true)))
+    next-state))
 
 (defn seal-barriers? [state]
   (if (sub/blocked? (m/subscriber (get-messenger state)))
@@ -314,14 +328,15 @@
 
 (defn seal-barriers [state]
   (let [messenger (get-messenger state)
-        [advance? pipeline] (oo/synced? (get-output-pipeline state) (m/epoch messenger))] 
+        [advance? pipeline] (oo/synced? (get-output-pipeline state) 
+                                        (m/epoch messenger))] 
     (set-output-pipeline! state pipeline)
     (if advance?
       (do
+       (m/next-epoch! messenger)
        (when (and (sub/completed? (m/subscriber messenger)) 
                   (not (sealed? state)))
-         (complete-job! state))
-       (m/next-epoch! messenger)
+         (seal-output! state))
        (-> state
            ;; prepare to send barrier status
            (set-context! {:src-peers (sub/src-peers (m/subscriber messenger))})
@@ -941,8 +956,9 @@
       (debug (:log-prefix component) "Stopped task. Waiting to fall out of task loop.")
       (reset! (:kill-flag component) true)
       (when-let [last-state (final-state component)]
-        (when-not (empty? (:onyx.core/triggers (get-event last-state)))
+        #_(when-not (empty? (:onyx.core/triggers (get-event last-state)))
           (ws/assign-windows last-state (:scheduler-event component)))
+
         (stop last-state (:scheduler-event component))
         (reset! (:task-kill-flag component) true))
       (when-let [f (:after-task-stop-fn component)] 

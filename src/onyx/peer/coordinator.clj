@@ -112,11 +112,8 @@
              :rem-barriers (m/publishers messenger)
              :messenger messenger))))
 
-(defn shutdown [{:keys [peer-config log workflow-depth job-id messenger scheduler-event] :as state}]
-  (assert scheduler-event)
-  (when (= scheduler-event :job-completed)
-    (let [coord [(m/replica-version messenger) (- (m/epoch messenger) workflow-depth)]] 
-      (write-checkpoint-coordinate log (:onyx/tenancy-id peer-config) job-id coord)))
+(defn shutdown [{:keys [peer-config log workflow-depth 
+                        job-id messenger scheduler-event] :as state}]
   (assoc state :messenger (component/stop messenger)))
 
 (defn coordinator-action [{:keys [messenger peer-id job-id] :as state} action-type new-replica]
