@@ -40,6 +40,7 @@
                  [macroz/tangle "0.1.9"]
                  [clj-tuple "0.2.2"]
                  [clj-fuzzy "0.3.1" :exclusions [org.clojure/clojurescript]]]
+  :java-source-paths ["src-java"]
   :jvm-opts ^:replace ["-Xmx4g" 
                        "-server"
                        ;"-Daeron.term.buffer.length=4194304"

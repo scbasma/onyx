@@ -17,7 +17,135 @@
            [org.agrona.concurrent UnsafeBuffer IdleStrategy BackoffIdleStrategy BusySpinIdleStrategy]
            [onyx.messaging.aeron.publisher Publisher]
            [java.util.function Consumer]
-           [java.util.concurrent TimeUnit]))
+           [java.util.concurrent TimeUnit]
+           [onyx.serialization MessageEncoder DynamicMapEncoder]
+           [java.nio ByteBuffer]
+           
+           ))
+
+(comment
+(time (dotimes [v 1000000]
+        (count (messaging-compress (java.util.UUID/randomUUID)))))
+
+(def words ["sietna" "itnarinst"])
+
+(time (let [encoder (MapEncoder.)
+      buffer (byte-array 900)
+      buf ^UnsafeBuffer (UnsafeBuffer. buffer)]
+        (dotimes [t 1000000] 
+          (let [a "sietna"
+                b " itnarinst"
+                aa (.getBytes a)
+                bb (.getBytes b)
+                encoder (-> encoder 
+                            (.wrap buf 0)
+                            (.putKey aa 0 (alength aa))
+                            (.putValue bb 0 (alength bb)))]
+            (.encodedLength encoder)))))
+
+(let [encoder ^MessageEncoder (MessageEncoder.)
+      buffer (byte-array 900)
+      buf ^UnsafeBuffer (UnsafeBuffer. buffer)]
+  (dotimes [v 1000]
+    (let [encoder (-> encoder 
+                      (.wrap buf 0)
+                      (.replicaVersion 50000332)
+                      (.destId 68830003)
+                      (.replicaVersion 5000000000))
+          bs ^bytes (messaging-compress {:a nil :b nil})
+          bs ^bytes (messaging-compress {:a nil :b nil})
+          bs ^bytes (messaging-compress {:a nil :b nil})
+          bs ^bytes (messaging-compress {:a nil :b nil})
+          bs ^bytes (messaging-compress {:a nil :b nil})
+          bs ^bytes (messaging-compress {:a nil :b nil})
+          bs ^bytes (messaging-compress {:a nil :b nil})
+          bs ^bytes (messaging-compress {:a nil :b nil})
+          bs ^bytes (messaging-compress {:a nil :b nil})
+          bs ^bytes (messaging-compress {:a nil :b nil})
+          bs ^bytes (messaging-compress {:a nil :b nil})
+          bs ^bytes (messaging-compress {:a nil :b nil})
+          bs ^bytes (messaging-compress {:a nil :b nil})
+          bs ^bytes (messaging-compress {:a nil :b nil})
+          bs ^bytes (messaging-compress {:a nil :b nil})
+          bs ^bytes (messaging-compress {:a nil :b nil})
+          bs ^bytes (messaging-compress {:a nil :b nil})
+          bs ^bytes (messaging-compress {:a nil :b nil})
+          cnt ^int (alength bs)
+          segments-encoder (-> (.segmentsCount encoder 18)
+                               (.putSegmentBytes bs 0 cnt)
+                               (.putSegmentBytes bs 0 cnt)
+                               (.putSegmentBytes bs 0 cnt)
+                               (.putSegmentBytes bs 0 cnt)
+                               (.putSegmentBytes bs 0 cnt)
+                               (.putSegmentBytes bs 0 cnt)
+                               (.putSegmentBytes bs 0 cnt)
+                               (.putSegmentBytes bs 0 cnt)
+                               (.putSegmentBytes bs 0 cnt)
+                               (.putSegmentBytes bs 0 cnt)
+                               (.putSegmentBytes bs 0 cnt)
+                               (.putSegmentBytes bs 0 cnt)
+                               (.putSegmentBytes bs 0 cnt)
+                               (.putSegmentBytes bs 0 cnt)
+                               (.putSegmentBytes bs 0 cnt)
+                               (.putSegmentBytes bs 0 cnt)
+                               (.putSegmentBytes bs 0 cnt)
+                               (.putSegmentBytes bs 0 cnt))]
+      (.encodedLength encoder)
+      ))
+  ;(into [] buffer)
+  )
+
+(time (let [encoder ^MessageEncoder (MessageEncoder.)
+            buffer (byte-array 900)
+            buf ^UnsafeBuffer (UnsafeBuffer. buffer)]
+        (dotimes [v 1000000]
+          (let [encoder (-> encoder 
+                          (.wrap buf 0)
+                          (.replicaVersion 50000332)
+                          (.destId 68830003)
+                          (.replicaVersion 5000000000))
+              bs ^bytes (messaging-compress {:a nil :b nil})
+              bs ^bytes (messaging-compress {:a nil :b nil})
+              bs ^bytes (messaging-compress {:a nil :b nil})
+              bs ^bytes (messaging-compress {:a nil :b nil})
+              bs ^bytes (messaging-compress {:a nil :b nil})
+              bs ^bytes (messaging-compress {:a nil :b nil})
+              bs ^bytes (messaging-compress {:a nil :b nil})
+              bs ^bytes (messaging-compress {:a nil :b nil})
+              bs ^bytes (messaging-compress {:a nil :b nil})
+              bs ^bytes (messaging-compress {:a nil :b nil})
+              bs ^bytes (messaging-compress {:a nil :b nil})
+              bs ^bytes (messaging-compress {:a nil :b nil})
+              bs ^bytes (messaging-compress {:a nil :b nil})
+              bs ^bytes (messaging-compress {:a nil :b nil})
+              bs ^bytes (messaging-compress {:a nil :b nil})
+              bs ^bytes (messaging-compress {:a nil :b nil})
+              bs ^bytes (messaging-compress {:a nil :b nil})
+              bs ^bytes (messaging-compress {:a nil :b nil})
+              cnt ^int (alength bs)
+              segments-encoder (-> (.segmentsCount encoder 18)
+                                   (.putSegmentBytes bs 0 cnt)
+                                   (.putSegmentBytes bs 0 cnt)
+                                   (.putSegmentBytes bs 0 cnt)
+                                   (.putSegmentBytes bs 0 cnt)
+                                   (.putSegmentBytes bs 0 cnt)
+                                   (.putSegmentBytes bs 0 cnt)
+                                   (.putSegmentBytes bs 0 cnt)
+                                   (.putSegmentBytes bs 0 cnt)
+                                   (.putSegmentBytes bs 0 cnt)
+                                   (.putSegmentBytes bs 0 cnt)
+                                   (.putSegmentBytes bs 0 cnt)
+                                   (.putSegmentBytes bs 0 cnt)
+                                   (.putSegmentBytes bs 0 cnt)
+                                   (.putSegmentBytes bs 0 cnt)
+                                   (.putSegmentBytes bs 0 cnt)
+                                   (.putSegmentBytes bs 0 cnt)
+                                   (.putSegmentBytes bs 0 cnt)
+                                   (.putSegmentBytes bs 0 cnt))]
+          (.encodedLength encoder)
+          ))
+  ;(into [] buffer)
+  )))
 
 ;; TODO:
 ;; Use java.util.concurrent.atomic.AtomicLong for tickets
