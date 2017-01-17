@@ -176,12 +176,12 @@
                                                slot-id checkpoint-type)]
                     (-> (.getAmazonS3Client ^TransferManager transfer-manager)
                         (checkpointed-bytes bucket k)))
-                  (catch AmazonS3Exception es3
-                    es3))]
+                  (catch AmazonS3Exception es3 es3))]
       (if (= (type result) com.amazonaws.services.s3.model.AmazonS3Exception)
         (if (and (pos? n-retries)
                  (= "NoSuchKey" (.getErrorCode ^AmazonS3Exception result)))
           (do
+           (println "RETRYING KEY READ" result)
            (LockSupport/parkNanos (* 1000 1000000))
            (recur (dec n-retries)))
           (throw result))
