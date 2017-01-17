@@ -1,5 +1,6 @@
 (ns onyx.storage.s3
-  (:require [onyx.checkpoint :as checkpoint])
+  (:require [onyx.checkpoint :as checkpoint]
+            [taoensso.timbre :refer [info error warn trace fatal] :as timbre])
   (:import [com.amazonaws.auth DefaultAWSCredentialsProviderChain]
            [com.amazonaws.handlers AsyncHandler]
            [com.amazonaws.regions RegionUtils]
@@ -181,7 +182,7 @@
         (if (and (pos? n-retries)
                  (= "NoSuchKey" (.getErrorCode ^AmazonS3Exception result)))
           (do
-           (println "RETRYING KEY READ" result)
+           (info (format "Unable to read S3 checkpoint as the key does not exist yet. Retrying up to %s times." n-retries))
            (LockSupport/parkNanos (* 1000 1000000))
            (recur (dec n-retries)))
           (throw result))
