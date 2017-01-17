@@ -114,7 +114,7 @@
     (endpoint-status/poll! status-mon)
     this)
   (offer! [this buf endpoint-epoch]
-    ;; TODO, remove
+    ;; TODO, remove the need to poll before every offer
     (endpoint-status/poll! status-mon)
     (cond (not (endpoint-status/ready? status-mon))
           (do
