@@ -171,7 +171,7 @@
 
 (defmethod checkpoint/read-checkpoint onyx.storage.s3.CheckpointManager
   [{:keys [transfer-manager bucket id] :as storage} tenancy-id job-id replica-version epoch task-id slot-id checkpoint-type]
-  (loop [n-retries 5]
+  (loop [n-retries 20]
     (let [result (try
                   (let [k (checkpoint-task-key tenancy-id job-id replica-version epoch task-id
                                                slot-id checkpoint-type)]
