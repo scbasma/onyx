@@ -50,8 +50,7 @@
   (run! pub/offer-heartbeat! (m/publishers messenger))
   (assoc state :last-heartbeat-time (System/nanoTime)))
 
-(defn offer-barriers [{:keys [messenger rem-barriers barrier-opts offering?] :as state} 
-                      barrier-period-ns]
+(defn offer-barriers [{:keys [messenger rem-barriers barrier-opts offering?] :as state}]
   (if offering? 
     (let [_ (run! pub/poll-heartbeats! (m/publishers messenger))
           offer-xf (comp (map (fn [pub]
@@ -62,7 +61,6 @@
           new-remaining (sequence offer-xf rem-barriers)]
       (if (empty? new-remaining)
         (-> state 
-            (assoc :next-barrier-time (+ (System/nanoTime) barrier-period-ns))
             (assoc :checkpoint-version nil)
             (assoc :offering? false)
             (assoc :rem-barriers nil))   
@@ -103,6 +101,8 @@
                                   (m/set-epoch! 0))
                 coordinates (read-checkpoint-coordinate log tenancy-id job-id)]
             (assoc state 
+                   ;; should probably be 0 if we have non checkpoint barriers
+                   :checkpoint-epoch 0
                    :sealing? false
                    :completed? false
                    :offering? true
@@ -122,7 +122,6 @@
         epoch (m/epoch messenger)]
     (let [coordinates {:tenancy-id tenancy-id :job-id job-id :replica-version replica-version :epoch epoch} 
           next-write-version (write-coordinate write-version log tenancy-id job-id coordinates)]
-      (println "COMPLETE JOB!!!" coordinates)
       (-> state
           (complete-job! job-id)
           (assoc :completed? true :sealing? false :write-version next-write-version)))))
@@ -170,9 +169,6 @@
                             (write-coordinate write-version log tenancy-id job-id coordinates)
                             write-version)
           messenger (m/set-epoch! messenger (inc (m/epoch messenger)))]
-      ;; TODO, coordinator can now use the min downstream epoch to checkpoint
-      ;; if they also pass up whether they completed, then it can write
-      ;; out the final checkpoint and also the complete job message, without
       ;; all the inputs sealing
       (assoc state 
              :checkpointing? true
@@ -206,12 +202,9 @@
           (if-let [new-replica (poll! allocation-ch)]
             ;; Set up reallocation barriers. Will be sent on next recur through :offer-barriers
             (recur (next-replica state barrier-period-ns new-replica))
-            ;; MAY NOT NEED OFFERENG WITH NEW MERGED STATUSES
             (let [_ (run! pub/poll-heartbeats! (m/publishers messenger))
                   status (merged-statuses messenger)] 
-              (info "COORDINATOR STATUS" status "VS US" (m/replica-version messenger) (m/epoch messenger)
-                    :sealing? (:sealing? state)
-                    )
+              ; (info "COORDINATOR STATUS" status (m/replica-version messenger) (m/epoch messenger) :sealing? (:sealing? state))
               (cond (:completed? state)
                     (do
                      (LockSupport/parkNanos coordinator-max-sleep-ns)
@@ -219,35 +212,42 @@
 
                     (:offering? state)
                     ;; Continue offering barriers until success
-                    (recur (offer-barriers state barrier-period-ns)) 
+                    (recur (offer-barriers state)) 
 
                     (and (:sealing? state)
                          (= (m/epoch messenger) (:min-epoch status)))
-                    (complete-job state)
+                    (recur (complete-job state))
 
                     (> (System/nanoTime) (+ (:last-heartbeat-time state) heartbeat-ns))
                     ;; Immediately offer heartbeats
                     (recur (offer-heartbeats state))
 
-                    ;(not (checkpointing? state))
-                    ;(recur (assoc state :checkpointing? false))
 
-                    ;; ONLY WRITE OUT BARRIER IF SAME EPOCH
-                    ;; AND EVERYONE IS READY?
-                    ;; ONLY EMIT IF IMMEDATE DOWNSTREAM ARE BOTH ON THE SAME EPOCH. This is to get timer right.
                     (and (= (m/replica-version messenger) (:replica-version status))
                          (= (m/epoch messenger) (:min-epoch status))
+                         ;; we're already passed the checkpoint epoch, and none of the peers have signaled
+                         ;; that they're checkpointing. Since there can only be one outstanding checkpoint
+                         ;; that means the checkpointing is definitely finished and it's safe to checkpoint again.
+                         (and (>= (:min-epoch status)
+                                  (:checkpoint-epoch state))
+                              (:checkpointing? status)))
+                    ;; Checkpointing is complete. Schedule next checkpoint.
+                    (recur 
+                     (assoc state 
+                            :next-barrier-time (+ (System/nanoTime) barrier-period-ns) 
+                            :checkpointing? false))
+
+                    (and (= (m/replica-version messenger) (:replica-version status))
+                         (= (m/epoch messenger) (:min-epoch status))
+                         ;; TODO, allow barriers that aren't checkpointing.
+                         (false? (:checkpointing? status))
                          (not (:sealing? state))
                          (or (> (System/nanoTime) (:next-barrier-time state))
                              (:drained? status)))
                     ;; Setup barriers, will be sent on next recur through :offer-barriers
-                    (do
-                     (println "CHECKPOINT BARRIER as we're on the same epoch arnd it's time" status)
-                     (recur (assoc (periodic-barrier state) :sealing? (:drained? status))))
-
-                    ; (and (checkpoint-completed? state))
-                    ; ;; schedule a checkpoint
-                    ; (recur (assoc state :next-barrier-time (+ (System/nanoTime) barrier-period-ns)))
+                    (recur (assoc (periodic-barrier state) 
+                                  :checkpoint-epoch (m/epoch messenger)
+                                  :sealing? (:drained? status)))
 
                     :else
                     (do
@@ -276,12 +276,14 @@
   (-> (component/start messenger) 
       (m/set-replica-version! (get-in replica [:allocation-version job-id] -1))))
 
-(defn stop-coordinator! [{:keys [shutdown-ch allocation-ch]} scheduler-event]
+(defn stop-coordinator! [{:keys [shutdown-ch allocation-ch peer-id]} scheduler-event]
   (when shutdown-ch
+    (info "Stopping coordinator on:" peer-id)
     (>!! shutdown-ch scheduler-event)
     (close! shutdown-ch))
   (when allocation-ch 
-    (close! allocation-ch)))
+    (close! allocation-ch))
+  (info "Coordinator stopped."))
 
 (defrecord PeerCoordinator 
   [workflow resume-point log messenger-group peer-config peer-id job-id
@@ -315,10 +317,7 @@
   (started? [this]
     (true? (:started? this)))
   (stop [this scheduler-event]
-    (info "Stopping coordinator on:" peer-id)
     (stop-coordinator! this scheduler-event)
-    (deref (future (some-> this :coordinator-thread <!!)) 5000 :ugh)
-    (info "Coordinator stopped.")
     (assoc this :allocation-ch nil :started? false :shutdown-ch nil :coordinator-thread nil))
   (next-state [this old-replica new-replica]
     (let [started? (= (get-in old-replica [:coordinators job-id]) peer-id)

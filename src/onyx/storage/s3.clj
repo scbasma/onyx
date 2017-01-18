@@ -130,7 +130,6 @@
    task-id slot-id checkpoint-type checkpoint-bytes]
   (let [k (checkpoint-task-key tenancy-id job-id replica-version epoch task-id
                                slot-id checkpoint-type)
-        _ (println "WRITING CHECKPOINT" k)
         up ^Upload (onyx.storage.s3/upload ^TransferManager transfer-manager 
                                            bucket
                                            k 
@@ -174,8 +173,7 @@
   [{:keys [transfer-manager bucket id] :as storage} tenancy-id job-id replica-version epoch task-id slot-id checkpoint-type]
   (let [k (checkpoint-task-key tenancy-id job-id replica-version epoch task-id
                                slot-id checkpoint-type)]
-    (println "READING CHECKPOINT" k)
-    (loop [n-retries 20]
+    (loop [n-retries 5]
       (let [result (try
                     (-> (.getAmazonS3Client ^TransferManager transfer-manager)
                         (checkpointed-bytes bucket k))

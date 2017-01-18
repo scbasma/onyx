@@ -193,7 +193,6 @@
         checkpoint-bytes (checkpoint-compress checkpoint)]
     (checkpoint/write-checkpoint storage tenancy-id job-id (t/replica-version state) 
                                  (t/epoch state) task-id slot-id :input checkpoint-bytes)
-    (while (not (checkpoint/write-complete? storage)))
     (println "Checkpointed input" job-id (t/replica-version state) 
              (t/epoch state) task-id slot-id :input) 
     (advance state)))
@@ -209,7 +208,6 @@
     (println "n-bytes checkpointing:" (count checkpoint-bytes))
     (checkpoint/write-checkpoint storage tenancy-id job-id (t/replica-version state) 
                                  (t/epoch state) task-id slot-id :windows checkpoint-bytes)
-    (while (not (checkpoint/write-complete? storage)))
     (println "Checkpointed state" job-id (t/replica-version state) 
              (t/epoch state) task-id slot-id :windows)
     (advance state)))
@@ -244,9 +242,6 @@
     (sub/completed? (m/subscriber (get-messenger state)))))
 
 (defn try-seal-job! [state]
-  (info "TRY SEAL JOB" (completed? state) (not (sealed? state))
-        (output-task? state))
-  (println "TRY SEAL COMPLETED" (completed? state) (t/epoch state))
   (if (and (completed? state)
            (not (sealed? state)))
     (let [messenger (get-messenger state)
@@ -276,10 +271,7 @@
         subscriber (m/subscriber messenger)
         {:keys [onyx.core/storage]} (get-event state)]
     (if (sub/blocked? subscriber)
-      (do
-       (println "WRITE COMPLET?" (:onyx/name (:onyx.core/task-map (get-event state))) (checkpoint/write-complete? storage) (t/epoch state))
-       (if (and ;(checkpoint/write-complete? storage)
-                (synced? state)) 
+      (if (synced? state) 
         (let [state (next-epoch! state)
               #_(mark-snapshot-checkpointed! state)]
           (-> state
@@ -289,7 +281,7 @@
                              :publishers (m/publishers messenger)})
               (advance)))
         ;; we need to wait until we're synced
-        state))
+        state)
       (goto-next-batch! state))))
 
 (defn offer-barriers [state]
@@ -333,11 +325,8 @@
 (defn output-seal-barriers? [state]
   (let [{:keys [onyx.core/storage]} (get-event state)] 
     (if (sub/blocked? (m/subscriber (get-messenger state)))
-      (if (and ;(checkpoint/write-complete? storage)
-               (synced? state))
-        (do
-         (println "READY TO SEAL" (:onyx/name (:onyx.core/task-map (get-event state))) (t/epoch state))
-         (advance state))
+      (if (synced? state)
+        (advance state)
         state)
       (goto-next-batch! state))))
 
@@ -347,8 +336,6 @@
     ;; can do the checkpointed epoch from the min downstraem code
     ; (when-let [cp-epoch (sub/checkpointed-epoch subscriber)]
     ;   (oo/checkpointed! pipeline cp-epoch))
-
-    (println "SEAL!!" (:onyx/name (:onyx.core/task-map (get-event state))) (t/epoch state))
     (-> state
         (next-epoch!)
         (try-seal-job!)
