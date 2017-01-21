@@ -141,90 +141,156 @@ public class MessageEncoder
     }
 
 
-    public static int payloadBytesId()
-    {
-        return 19;
-    }
+    private final SegmentsEncoder segments = new SegmentsEncoder();
 
-    public static String payloadBytesCharacterEncoding()
-    {
-        return "UTF-8";
-    }
-
-    public static String payloadBytesMetaAttribute(final MetaAttribute metaAttribute)
-    {
-        switch (metaAttribute)
-        {
-            case EPOCH: return "unix";
-            case TIME_UNIT: return "nanosecond";
-            case SEMANTIC_TYPE: return "";
-        }
-
-        return "";
-    }
-
-    public static int payloadBytesHeaderLength()
+    public static long segmentsId()
     {
         return 4;
     }
 
-    public MessageEncoder putPayloadBytes(final DirectBuffer src, final int srcOffset, final int length)
+    public SegmentsEncoder segmentsCount(final int count)
     {
-        if (length > 1073741824)
-        {
-            throw new IllegalArgumentException("length > max value for type: " + length);
-        }
-
-        final int headerLength = 4;
-        final int limit = parentMessage.limit();
-        parentMessage.limit(limit + headerLength + length);
-        buffer.putInt(limit, (int)length, java.nio.ByteOrder.LITTLE_ENDIAN);
-        buffer.putBytes(limit + headerLength, src, srcOffset, length);
-
-        return this;
+        segments.wrap(parentMessage, buffer, count);
+        return segments;
     }
 
-    public MessageEncoder putPayloadBytes(final byte[] src, final int srcOffset, final int length)
+    public static class SegmentsEncoder
     {
-        if (length > 1073741824)
+        private static final int HEADER_SIZE = 4;
+        private final GroupSizeEncodingEncoder dimensions = new GroupSizeEncodingEncoder();
+        private MessageEncoder parentMessage;
+        private MutableDirectBuffer buffer;
+        private int count;
+        private int index;
+        private int offset;
+
+        public void wrap(
+            final MessageEncoder parentMessage, final MutableDirectBuffer buffer, final int count)
         {
-            throw new IllegalArgumentException("length > max value for type: " + length);
+            if (count < 0 || count > 65534)
+            {
+                throw new IllegalArgumentException("count outside allowed range: count=" + count);
+            }
+
+            this.parentMessage = parentMessage;
+            this.buffer = buffer;
+            dimensions.wrap(buffer, parentMessage.limit());
+            dimensions.blockLength((int)0);
+            dimensions.numInGroup((int)count);
+            index = -1;
+            this.count = count;
+            parentMessage.limit(parentMessage.limit() + HEADER_SIZE);
         }
 
-        final int headerLength = 4;
-        final int limit = parentMessage.limit();
-        parentMessage.limit(limit + headerLength + length);
-        buffer.putInt(limit, (int)length, java.nio.ByteOrder.LITTLE_ENDIAN);
-        buffer.putBytes(limit + headerLength, src, srcOffset, length);
-
-        return this;
-    }
-
-    public MessageEncoder payloadBytes(final String value)
-    {
-        final byte[] bytes;
-        try
+        public static int sbeHeaderSize()
         {
-            bytes = value.getBytes("UTF-8");
-        }
-        catch (final java.io.UnsupportedEncodingException ex)
-        {
-            throw new RuntimeException(ex);
+            return HEADER_SIZE;
         }
 
-        final int length = bytes.length;
-        if (length > 1073741824)
+        public static int sbeBlockLength()
         {
-            throw new IllegalArgumentException("length > max value for type: " + length);
+            return 0;
         }
 
-        final int headerLength = 4;
-        final int limit = parentMessage.limit();
-        parentMessage.limit(limit + headerLength + length);
-        buffer.putInt(limit, (int)length, java.nio.ByteOrder.LITTLE_ENDIAN);
-        buffer.putBytes(limit + headerLength, bytes, 0, length);
+        public SegmentsEncoder next()
+        {
+            if (index + 1 >= count)
+            {
+                throw new java.util.NoSuchElementException();
+            }
 
-        return this;
+            offset = parentMessage.limit();
+            parentMessage.limit(offset + sbeBlockLength());
+            ++index;
+
+            return this;
+        }
+
+        public static int segmentBytesId()
+        {
+            return 5;
+        }
+
+        public static String segmentBytesCharacterEncoding()
+        {
+            return "UTF-8";
+        }
+
+        public static String segmentBytesMetaAttribute(final MetaAttribute metaAttribute)
+        {
+            switch (metaAttribute)
+            {
+                case EPOCH: return "unix";
+                case TIME_UNIT: return "nanosecond";
+                case SEMANTIC_TYPE: return "";
+            }
+
+            return "";
+        }
+
+        public static int segmentBytesHeaderLength()
+        {
+            return 4;
+        }
+
+        public SegmentsEncoder putSegmentBytes(final DirectBuffer src, final int srcOffset, final int length)
+        {
+            if (length > 1073741824)
+            {
+                throw new IllegalArgumentException("length > max value for type: " + length);
+            }
+
+            final int headerLength = 4;
+            final int limit = parentMessage.limit();
+            parentMessage.limit(limit + headerLength + length);
+            buffer.putInt(limit, (int)length, java.nio.ByteOrder.LITTLE_ENDIAN);
+            buffer.putBytes(limit + headerLength, src, srcOffset, length);
+
+            return this;
+        }
+
+        public SegmentsEncoder putSegmentBytes(final byte[] src, final int srcOffset, final int length)
+        {
+            if (length > 1073741824)
+            {
+                throw new IllegalArgumentException("length > max value for type: " + length);
+            }
+
+            final int headerLength = 4;
+            final int limit = parentMessage.limit();
+            parentMessage.limit(limit + headerLength + length);
+            buffer.putInt(limit, (int)length, java.nio.ByteOrder.LITTLE_ENDIAN);
+            buffer.putBytes(limit + headerLength, src, srcOffset, length);
+
+            return this;
+        }
+
+        public SegmentsEncoder segmentBytes(final String value)
+        {
+            final byte[] bytes;
+            try
+            {
+                bytes = value.getBytes("UTF-8");
+            }
+            catch (final java.io.UnsupportedEncodingException ex)
+            {
+                throw new RuntimeException(ex);
+            }
+
+            final int length = bytes.length;
+            if (length > 1073741824)
+            {
+                throw new IllegalArgumentException("length > max value for type: " + length);
+            }
+
+            final int headerLength = 4;
+            final int limit = parentMessage.limit();
+            parentMessage.limit(limit + headerLength + length);
+            buffer.putInt(limit, (int)length, java.nio.ByteOrder.LITTLE_ENDIAN);
+            buffer.putBytes(limit + headerLength, bytes, 0, length);
+
+            return this;
+        }
     }
 
 

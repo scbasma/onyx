@@ -188,88 +188,196 @@ public class MessageDecoder
     }
 
 
-    public static int payloadBytesId()
-    {
-        return 19;
-    }
+    private final SegmentsDecoder segments = new SegmentsDecoder();
 
-    public static int payloadBytesSinceVersion()
-    {
-        return 0;
-    }
-
-    public static String payloadBytesCharacterEncoding()
-    {
-        return "UTF-8";
-    }
-
-    public static String payloadBytesMetaAttribute(final MetaAttribute metaAttribute)
-    {
-        switch (metaAttribute)
-        {
-            case EPOCH: return "unix";
-            case TIME_UNIT: return "nanosecond";
-            case SEMANTIC_TYPE: return "";
-        }
-
-        return "";
-    }
-
-    public static int payloadBytesHeaderLength()
+    public static long segmentsDecoderId()
     {
         return 4;
     }
 
-    public int payloadBytesLength()
+    public static int segmentsDecoderSinceVersion()
     {
-        final int limit = parentMessage.limit();
-        return (int)(buffer.getInt(limit, java.nio.ByteOrder.LITTLE_ENDIAN) & 0xFFFF_FFFFL);
+        return 0;
     }
 
-    public int getPayloadBytes(final MutableDirectBuffer dst, final int dstOffset, final int length)
+    public SegmentsDecoder segments()
     {
-        final int headerLength = 4;
-        final int limit = parentMessage.limit();
-        final int dataLength = (int)(buffer.getInt(limit, java.nio.ByteOrder.LITTLE_ENDIAN) & 0xFFFF_FFFFL);
-        final int bytesCopied = Math.min(length, dataLength);
-        parentMessage.limit(limit + headerLength + dataLength);
-        buffer.getBytes(limit + headerLength, dst, dstOffset, bytesCopied);
-
-        return bytesCopied;
+        segments.wrap(parentMessage, buffer);
+        return segments;
     }
 
-    public int getPayloadBytes(final byte[] dst, final int dstOffset, final int length)
+    public static class SegmentsDecoder
+        implements Iterable<SegmentsDecoder>, java.util.Iterator<SegmentsDecoder>
     {
-        final int headerLength = 4;
-        final int limit = parentMessage.limit();
-        final int dataLength = (int)(buffer.getInt(limit, java.nio.ByteOrder.LITTLE_ENDIAN) & 0xFFFF_FFFFL);
-        final int bytesCopied = Math.min(length, dataLength);
-        parentMessage.limit(limit + headerLength + dataLength);
-        buffer.getBytes(limit + headerLength, dst, dstOffset, bytesCopied);
+        private static final int HEADER_SIZE = 4;
+        private final GroupSizeEncodingDecoder dimensions = new GroupSizeEncodingDecoder();
+        private MessageDecoder parentMessage;
+        private DirectBuffer buffer;
+        private int count;
+        private int index;
+        private int offset;
+        private int blockLength;
 
-        return bytesCopied;
-    }
-
-    public String payloadBytes()
-    {
-        final int headerLength = 4;
-        final int limit = parentMessage.limit();
-        final int dataLength = (int)(buffer.getInt(limit, java.nio.ByteOrder.LITTLE_ENDIAN) & 0xFFFF_FFFFL);
-        parentMessage.limit(limit + headerLength + dataLength);
-        final byte[] tmp = new byte[dataLength];
-        buffer.getBytes(limit + headerLength, tmp, 0, dataLength);
-
-        final String value;
-        try
+        public void wrap(
+            final MessageDecoder parentMessage, final DirectBuffer buffer)
         {
-            value = new String(tmp, "UTF-8");
-        }
-        catch (final java.io.UnsupportedEncodingException ex)
-        {
-            throw new RuntimeException(ex);
+            this.parentMessage = parentMessage;
+            this.buffer = buffer;
+            dimensions.wrap(buffer, parentMessage.limit());
+            blockLength = dimensions.blockLength();
+            count = dimensions.numInGroup();
+            index = -1;
+            parentMessage.limit(parentMessage.limit() + HEADER_SIZE);
         }
 
-        return value;
+        public static int sbeHeaderSize()
+        {
+            return HEADER_SIZE;
+        }
+
+        public static int sbeBlockLength()
+        {
+            return 0;
+        }
+
+        public int actingBlockLength()
+        {
+            return blockLength;
+        }
+
+        public int count()
+        {
+            return count;
+        }
+
+        public java.util.Iterator<SegmentsDecoder> iterator()
+        {
+            return this;
+        }
+
+        public void remove()
+        {
+            throw new UnsupportedOperationException();
+        }
+
+        public boolean hasNext()
+        {
+            return (index + 1) < count;
+        }
+
+        public SegmentsDecoder next()
+        {
+            if (index + 1 >= count)
+            {
+                throw new java.util.NoSuchElementException();
+            }
+
+            offset = parentMessage.limit();
+            parentMessage.limit(offset + blockLength);
+            ++index;
+
+            return this;
+        }
+
+        public static int segmentBytesId()
+        {
+            return 5;
+        }
+
+        public static int segmentBytesSinceVersion()
+        {
+            return 0;
+        }
+
+        public static String segmentBytesCharacterEncoding()
+        {
+            return "UTF-8";
+        }
+
+        public static String segmentBytesMetaAttribute(final MetaAttribute metaAttribute)
+        {
+            switch (metaAttribute)
+            {
+                case EPOCH: return "unix";
+                case TIME_UNIT: return "nanosecond";
+                case SEMANTIC_TYPE: return "";
+            }
+
+            return "";
+        }
+
+        public static int segmentBytesHeaderLength()
+        {
+            return 4;
+        }
+
+        public int segmentBytesLength()
+        {
+            final int limit = parentMessage.limit();
+            return (int)(buffer.getInt(limit, java.nio.ByteOrder.LITTLE_ENDIAN) & 0xFFFF_FFFFL);
+        }
+
+        public int getSegmentBytes(final MutableDirectBuffer dst, final int dstOffset, final int length)
+        {
+            final int headerLength = 4;
+            final int limit = parentMessage.limit();
+            final int dataLength = (int)(buffer.getInt(limit, java.nio.ByteOrder.LITTLE_ENDIAN) & 0xFFFF_FFFFL);
+            final int bytesCopied = Math.min(length, dataLength);
+            parentMessage.limit(limit + headerLength + dataLength);
+            buffer.getBytes(limit + headerLength, dst, dstOffset, bytesCopied);
+
+            return bytesCopied;
+        }
+
+        public int getSegmentBytes(final byte[] dst, final int dstOffset, final int length)
+        {
+            final int headerLength = 4;
+            final int limit = parentMessage.limit();
+            final int dataLength = (int)(buffer.getInt(limit, java.nio.ByteOrder.LITTLE_ENDIAN) & 0xFFFF_FFFFL);
+            final int bytesCopied = Math.min(length, dataLength);
+            parentMessage.limit(limit + headerLength + dataLength);
+            buffer.getBytes(limit + headerLength, dst, dstOffset, bytesCopied);
+
+            return bytesCopied;
+        }
+
+        public String segmentBytes()
+        {
+            final int headerLength = 4;
+            final int limit = parentMessage.limit();
+            final int dataLength = (int)(buffer.getInt(limit, java.nio.ByteOrder.LITTLE_ENDIAN) & 0xFFFF_FFFFL);
+            parentMessage.limit(limit + headerLength + dataLength);
+            final byte[] tmp = new byte[dataLength];
+            buffer.getBytes(limit + headerLength, tmp, 0, dataLength);
+
+            final String value;
+            try
+            {
+                value = new String(tmp, "UTF-8");
+            }
+            catch (final java.io.UnsupportedEncodingException ex)
+            {
+                throw new RuntimeException(ex);
+            }
+
+            return value;
+        }
+
+
+        public String toString()
+        {
+            return appendTo(new StringBuilder(100)).toString();
+        }
+
+        public StringBuilder appendTo(final StringBuilder builder)
+        {
+            builder.append('(');
+            //Token{signal=BEGIN_VAR_DATA, name='segmentBytes', description='null', id=5, version=0, encodedLength=0, offset=0, componentTokenCount=6, encoding=Encoding{presence=REQUIRED, primitiveType=null, byteOrder=LITTLE_ENDIAN, minValue=null, maxValue=null, nullValue=null, constValue=null, characterEncoding='null', epoch='unix', timeUnit=nanosecond, semanticType='null'}}
+            builder.append("segmentBytes=");
+            builder.append(segmentBytes());
+            builder.append(')');
+            return builder;
+        }
     }
 
 
@@ -311,9 +419,19 @@ public class MessageDecoder
         builder.append("destId=");
         builder.append(destId());
         builder.append('|');
-        //Token{signal=BEGIN_VAR_DATA, name='payloadBytes', description='null', id=19, version=0, encodedLength=0, offset=10, componentTokenCount=6, encoding=Encoding{presence=REQUIRED, primitiveType=null, byteOrder=LITTLE_ENDIAN, minValue=null, maxValue=null, nullValue=null, constValue=null, characterEncoding='null', epoch='unix', timeUnit=nanosecond, semanticType='null'}}
-        builder.append("payloadBytes=");
-        builder.append(payloadBytes());
+        //Token{signal=BEGIN_GROUP, name='segments', description='null', id=4, version=0, encodedLength=0, offset=10, componentTokenCount=12, encoding=Encoding{presence=REQUIRED, primitiveType=null, byteOrder=LITTLE_ENDIAN, minValue=null, maxValue=null, nullValue=null, constValue=null, characterEncoding='null', epoch='null', timeUnit=null, semanticType='null'}}
+        builder.append("segments=[");
+        SegmentsDecoder segments = segments();
+        if (segments.count() > 0)
+        {
+            while (segments.hasNext())
+            {
+                segments.next().appendTo(builder);
+                builder.append(',');
+            }
+            builder.setLength(builder.length() - 1);
+        }
+        builder.append(']');
 
         limit(originalLimit);
 

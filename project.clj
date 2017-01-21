@@ -35,7 +35,7 @@
                                com.cemerick/austin]]
                  [prismatic/schema "1.0.5"]
                  [log4j/log4j "1.2.17"]
-                 [uk.co.real-logic/sbe-all "1.5.5"]
+                 ;[uk.co.real-logic/sbe-all "1.5.5"]
                  [com.amazonaws/aws-java-sdk-s3 "1.11.58"]
                  [clj-tuple "0.2.2"]
                  [clj-fuzzy "0.3.1" :exclusions [org.clojure/clojurescript]]]

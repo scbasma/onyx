@@ -5,8 +5,6 @@
             [org.agrona.concurrent UnsafeBuffer]
             [java.nio ByteBuffer]))
 
-(def words ["sietna" "itnarinst"])
-
 ; (time 
 ;   (let [encoder (MapEncoder.)
 ;         buffer (byte-array 900)
@@ -26,56 +24,41 @@
   (aset decoders (MessageEncoder/TEMPLATE_ID) (fn [v] (MessageDecoder.)))
   decoders)
 
-
-
-
-            .wrap(directBuffer, bufferOffset)                                                                                                                                                                                                 
-            .blockLength(CAR_ENCODER.sbeBlockLength())                                                                                                                                                                                        
-            .templateId(CAR_ENCODER.sbeTemplateId())                                                                                                                                                                                          
-            .schemaId(CAR_ENCODER.sbeSchemaId())                                                                                                                                                                                              
-            .version(CAR_ENCODER.sbeSchemaVersion());                                                                                                                                                                                         
-
-
 (time 
  (let [encoder ^MessageEncoder (MessageEncoder.)
        buffer (byte-array 900000)
        buf ^UnsafeBuffer (UnsafeBuffer. buffer)]
-   ;dotimes [v 1]
-   (let [encoder (-> encoder 
-                     ;(.blockLength MessageEncoder/BLOCK_LENGTH)
-                     ;(.templateId MessageEncoder/TEMPLATE_ID)
-                     (.wrap buf 0)
-                     (.destId 68830003)
-                     (.replicaVersion 5000000000))
-         seg-count 20
-         seg-encoder (reduce (fn [^MessageEncoder$SegmentsEncoder enc v]
-                               (let [bs ^bytes (messaging-compress {:a "hiseta" :b "esntiarn"})
-                                     cnt ^int (alength bs)] 
-                                 (.putSegmentBytes (.next enc)
-                                                   bs
-                                                   0 
-                                                   cnt)))
-                             (.segmentsCount encoder seg-count)
-                             (range seg-count))]
-     (let [decoder (-> (MessageDecoder.)
-                       ;; don't hardcode this thing
-                       (.wrap buf 0 MessageDecoder/BLOCK_LENGTH 0))
-           ;segments (.segments decoder)
-           
-           ]
-       (let [
-             
-           byte-array  (.payloadBytesLength decoder)
-           byte-array 
-           byte-array 
-             ])
-       ;(.encodedLength decoder)
-       ;(.encodedLength encoder)
-       ;(messaging-decompress (.segmentBytes (.next seg-dec)))
-       (.count seg-dec)
-       
-       
-       ))))
+   (dotimes [v 10000]
+     (let [encoder (-> encoder 
+                       ;(.blockLength MessageEncoder/BLOCK_LENGTH)
+                       ;(.templateId MessageEncoder/TEMPLATE_ID)
+                       (.wrap buf 0)
+                       (.destId 68830003)
+                       (.replicaVersion 5000000000))
+           seg-count 20
+           seg-encoder (reduce (fn [^MessageEncoder$SegmentsEncoder enc v]
+                                 (let [bs ^bytes (messaging-compress {:n v :a "hiseta" :b "esntiarn"})
+                                       cnt ^int (alength bs)] 
+                                   (.putSegmentBytes (.next enc)
+                                                     bs
+                                                     0 
+                                                     cnt)))
+                               (.segmentsCount encoder seg-count)
+                               (range seg-count))]
+       (let [decoder (-> (MessageDecoder.)
+                         ;; don't hardcode this thing
+                         (.wrap buf 0 MessageDecoder/BLOCK_LENGTH 0))
+             seg-dec (.segments decoder)
+             ;  #_(.next seg-dec)
+             messages (transient [])
+             ]
+         (loop [seg-dec seg-dec]
+           (if (.hasNext seg-dec)
+             (let [bs (byte-array (.segmentBytesLength seg-dec))]
+               (.getSegmentBytes seg-dec bs 0 (.segmentBytesLength seg-dec))
+               (conj! messages (messaging-decompress bs))
+               (recur (.next seg-dec)))))
+         (persistent! messages))))))
 
 (time (let [encoder ^MessageEncoder (MessageEncoder.)
             buffer (byte-array 900)
