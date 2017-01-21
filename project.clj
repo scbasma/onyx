@@ -48,6 +48,7 @@
                        "-XX:+UnlockCommercialFeatures"
                        "-XX:+FlightRecorder"
                        "-XX:StartFlightRecording=duration=1080s,filename=recording.jfr"]
+  :java-source-paths ["src-java"]
   :profiles {:dev {:global-vars {*warn-on-reflection* true}
                    :dependencies [[org.clojure/tools.nrepl "0.2.11"]
                                   [clojure-future-spec "1.9.0-alpha14"]
