@@ -26,25 +26,18 @@
         (mod hsh n-slots))    
       load-balance-slot-id)))
 
-(defn offer-segments [replica-version epoch publishers ^MessageEncoder encoder buffer 
-                      batch {:keys [dst-task-id slot-id] :as task-slot}]
+(defn offer-segments [replica-version epoch ^MessageEncoder encoder buffer batch publisher]
   (let [encoder (-> encoder
                     ;; offset by 1 byte, as message type is encoded
                     (.wrap buffer 1)
                     (.replicaVersion replica-version)) 
         length (sz/add-segment-payload! encoder batch)] 
-    ;; TODO: switch to int2object map lookup
-    (loop [pubs (shuffle (get publishers [dst-task-id slot-id]))]
-      ;; TODO: retry offers a few times for perf.
-      (if-let [^Publisher publisher (first pubs)]
-        (let [encoder (.destId encoder (pub/short-id publisher))
-              ret (pub/offer! publisher buffer (inc length) epoch)]
-          (debug "Offer segment" [:ret ret :dst-task-id dst-task-id :slot-id slot-id 
-                                  :batch batch :pub (pub/info publisher)])
-          (if (neg? ret)
-            (recur (rest pubs))
-            length))
-        0))))
+    (let [encoder (.destId encoder (pub/short-id publisher))
+          ret (pub/offer! publisher buffer (inc length) epoch)]
+      (debug "Offer segment" [:ret ret :batch batch :pub (pub/info publisher)])
+      (if (neg? ret)
+        0 
+        length))))
 
 ;; TODO: split out destinations for retry, may need to switch destinations, can
 ;; do every thing in a single offer 
@@ -55,38 +48,42 @@
         publishers (m/task-slot->publishers messenger)] 
     (loop [batches prepared 
            bytes-sent 0]
-      (if-let [[task-slot batch] (first batches)] 
+      (if-let [[pub batch] (first batches)] 
         (let [encoder (.wrap encoder buffer 1)
-              ret (offer-segments replica-version epoch publishers encoder buffer batch task-slot)]
+              ret (offer-segments replica-version epoch encoder buffer batch pub)]
           (if (pos? ret)
             (recur (rest batches) 
-                   (+ bytes-sent ret))
+                   (unchecked-add-int bytes-sent ret))
             [batches bytes-sent]))
         [nil bytes-sent]))))
 
-(defn partition-xf [task-slot write-batch-size]
-  ;; Ideally, write batching would be in terms of numbers of bytes. We could serialize 
-  ;; message by message until we hit the cut-off point
-  ;; TODO: output batch size should also be capped at the batch size of the downstream task
+(defn partition-xf [publisher write-batch-size]
+  ;; Ideally, write batching would be in terms of numbers of bytes. 
+  ;; We should serialize message by message ahead of time until we hit the cut-off point
+  ;; Output batch size should also be capped at the batch size of the downstream task
   (comp (map first)
         (partition-all write-batch-size)
         (map (fn [segments]
-               (list task-slot segments)))))
+               (list publisher segments)))))
 
-(defn add-segment [^java.util.ArrayList flattened segment event result 
-                   job-id egress-tasks task->group-by-fn 
-                   job-task-id-slots]
+(defn add-segment [^java.util.ArrayList flattened segment event result publishers]
   (let [routes (r/route-data event result segment)
         ;; In the future we should serialize a segment only once
         ;; actually we could do that here. If segments is equal, then we reserialize
         segment* (r/flow-conditions-transform segment routes event)
         ;; clean up task->group-by fn, should already have egress-tasks in it
-        hash-group (g/hash-groups segment* egress-tasks task->group-by-fn)]
+        ;hash-group (g/hash-groups segment* egress-tasks task->group-by-fn)
+
+        ; (if-let [group-fn (task->group-by-fn t)]
+        ;   (assoc groups t (hash (group-fn message)))
+        ;   groups)
+
+        ]
     (run! (fn [route]
+            (println "pubs " publishers " route " route)
             (.add flattened 
                   (list segment* 
-                        {:slot-id (select-slot job-task-id-slots hash-group route)
-                         :dst-task-id [job-id route]})))
+                        (rand-nth (get publishers route)))))
           (:flow routes))))
 
 (deftype MessengerOutput [^:unsynchronized-mutable remaining ^MessageEncoder encoder ^UnsafeBuffer buffer 
@@ -103,24 +100,34 @@
   (prepare-batch [this 
                   {:keys [onyx.core/id onyx.core/job-id onyx.core/task-id 
                           onyx.core/results onyx.core/triggered egress-tasks
-                          task->group-by-fn] :as event} replica]
+                          task->group-by-fn] :as event} 
+                  replica
+                  messenger]
     (let [job-task-id-slots (get-in replica [:task-slot-ids job-id])
+          ; selection-fn (let [this-job-id job-id
+          ;                    this-peer-id id]
+          ;                (->> (:message-short-ids replica)
+          ;                     (filter (fn [[{:keys [job-id src-peer-id]} _]]
+          ;                               (and (= job-id this-job-id) 
+          ;                                    (= src-peer-id this-peer-id))))
+          ;                     (group-by (comp :dst-task-id key))
+          ;                     (map (fn [[dst-task-id dests]]
+          ;                            (let [dsts (vals dests)]
+          ;                              [dst-task-id (fn [] (rand-nth dsts))])))
+          ;                     (into {})))
+          publishers (m/task-slot->publishers messenger)
           _ (run! (fn [{:keys [leaves] :as result}]
                     (run! (fn [seg]
-                            (add-segment flattened seg event result job-id
-                                         egress-tasks task->group-by-fn
-                                         job-task-id-slots))
+                            (add-segment flattened seg event result publishers))
                           leaves))
                   (:tree results))
           _ (run! (fn [seg]
                     ;; there is no true root for triggered events, use nil for now
-                    (add-segment flattened seg event {:root nil :leaves [seg]} 
-                                 job-id egress-tasks task->group-by-fn
-                                 job-task-id-slots))
+                    (add-segment flattened seg event {:root nil :leaves [seg]} publishers))
                   triggered)
           xf (comp (x/by-key second (x/into []))
-                   (mapcat (fn [[task-slot coll]]
-                             (sequence (partition-xf task-slot write-batch-size) 
+                   (mapcat (fn [[short-id coll]]
+                             (sequence (partition-xf short-id write-batch-size) 
                                        coll))))
           final-output (sequence xf flattened)]
       (.clear ^java.util.ArrayList flattened)

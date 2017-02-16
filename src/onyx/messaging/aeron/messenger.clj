@@ -78,8 +78,17 @@
   (publishers [messenger]
     (flatten-publishers publishers))
 
+  ;; dst-task -> publishers
+  ;; also have dst-task + hash -> publisher
+  ;; to do the hash one, group-by dst-task-id, then sort-by slot-id, then build fn to turn hash
+  ;; into publisher by hash modding and looking up in vector
+
+  ;; if we pour it directly into a vec, sorted by slot-id then it'll be fine to just mod by count
+
+  ;; :continue won't work well unfortunately
   (task-slot->publishers [messenger]
-    publishers)
+    (->> (flatten-publishers publishers)
+         (group-by #(second (.dst-task-id %)))))
 
   (subscriber [messenger]
     subscriber)
