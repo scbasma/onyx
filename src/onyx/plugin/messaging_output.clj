@@ -16,16 +16,6 @@
            [java.util.concurrent.atomic AtomicLong]
            [onyx.serialization MessageEncoder MessageDecoder MessageEncoder$SegmentsEncoder]))
 
-;; TODO, generate a slot selector fn on task start
-(defn select-slot [job-task-id-slots hash-group route]
-  (if (empty? hash-group)
-    load-balance-slot-id
-    (if-let [hsh (get hash-group route)]
-      ;; TODO: slow, not precomputed
-      (let [n-slots (inc (apply max (vals (get job-task-id-slots route))))] 
-        (mod hsh n-slots))    
-      load-balance-slot-id)))
-
 (defn offer-segments [replica-version epoch ^MessageEncoder encoder buffer batch publisher]
   (let [encoder (-> encoder
                     ;; offset by 1 byte, as message type is encoded
@@ -44,8 +34,7 @@
 ;; TODO: be smart about sending messages to multiple co-located tasks
 (defn send-messages [messenger ^MessageEncoder encoder buffer prepared]
   (let [replica-version (m/replica-version messenger)
-        epoch (m/epoch messenger)
-        publishers (m/task-slot->publishers messenger)] 
+        epoch (m/epoch messenger)] 
     (loop [batches prepared 
            bytes-sent 0]
       (if-let [[pub batch] (first batches)] 
@@ -66,28 +55,18 @@
         (map (fn [segments]
                (list publisher segments)))))
 
-(defn add-segment [^java.util.ArrayList flattened segment event result publishers]
+(defn add-segment [^java.util.ArrayList flattened segment event result get-pub-fn]
   (let [routes (r/route-data event result segment)
-        ;; In the future we should serialize a segment only once
-        ;; actually we could do that here. If segments is equal, then we reserialize
-        segment* (r/flow-conditions-transform segment routes event)
-        ;; clean up task->group-by fn, should already have egress-tasks in it
-        ;hash-group (g/hash-groups segment* egress-tasks task->group-by-fn)
-
-        ; (if-let [group-fn (task->group-by-fn t)]
-        ;   (assoc groups t (hash (group-fn message)))
-        ;   groups)
-
-        ]
+        segment* (r/flow-conditions-transform segment routes event)]
     (run! (fn [route]
-            (println "pubs " publishers " route " route)
             (.add flattened 
                   (list segment* 
-                        (rand-nth (get publishers route)))))
+                        (get-pub-fn segment* route))))
           (:flow routes))))
 
-(deftype MessengerOutput [^:unsynchronized-mutable remaining ^MessageEncoder encoder ^UnsafeBuffer buffer 
-                          ^long write-batch-size ^java.util.ArrayList flattened ^AtomicLong written-bytes]
+(deftype MessengerOutput [^:unsynchronized-mutable remaining ^MessageEncoder encoder 
+                          ^UnsafeBuffer buffer ^long write-batch-size 
+                          ^java.util.ArrayList flattened ^AtomicLong written-bytes]
   op/Plugin
   (start [this event] this)
 
@@ -97,37 +76,27 @@
   (synced? [this _]
     true)
 
-  (prepare-batch [this 
-                  {:keys [onyx.core/id onyx.core/job-id onyx.core/task-id 
-                          onyx.core/results onyx.core/triggered egress-tasks
-                          task->group-by-fn] :as event} 
-                  replica
-                  messenger]
-    (let [job-task-id-slots (get-in replica [:task-slot-ids job-id])
-          ; selection-fn (let [this-job-id job-id
-          ;                    this-peer-id id]
-          ;                (->> (:message-short-ids replica)
-          ;                     (filter (fn [[{:keys [job-id src-peer-id]} _]]
-          ;                               (and (= job-id this-job-id) 
-          ;                                    (= src-peer-id this-peer-id))))
-          ;                     (group-by (comp :dst-task-id key))
-          ;                     (map (fn [[dst-task-id dests]]
-          ;                            (let [dsts (vals dests)]
-          ;                              [dst-task-id (fn [] (rand-nth dsts))])))
-          ;                     (into {})))
-          publishers (m/task-slot->publishers messenger)
+  (prepare-batch [this {:keys [onyx.core/results onyx.core/triggered task->group-by-fn] :as event} 
+                  replica messenger]
+    (let [get-pub-fn (if (empty? task->group-by-fn)
+                       (fn [segment dst-task-id]
+                         (rand-nth (m/task->publishers messenger dst-task-id)))            
+                       (fn [segment dst-task-id]
+                         (let [group-fn (task->group-by-fn dst-task-id) 
+                               hsh (hash (group-fn segment))
+                               dest-pubs (m/task->publishers messenger dst-task-id)]
+                           (get dest-pubs (mod hsh (count dest-pubs))))))
           _ (run! (fn [{:keys [leaves] :as result}]
                     (run! (fn [seg]
-                            (add-segment flattened seg event result publishers))
+                            (add-segment flattened seg event result get-pub-fn))
                           leaves))
                   (:tree results))
-          _ (run! (fn [seg]
-                    ;; there is no true root for triggered events, use nil for now
-                    (add-segment flattened seg event {:root nil :leaves [seg]} publishers))
+          _ (run! (fn [seg] 
+                    (add-segment flattened seg event {:leaves [seg]} get-pub-fn))
                   triggered)
           xf (comp (x/by-key second (x/into []))
-                   (mapcat (fn [[short-id coll]]
-                             (sequence (partition-xf short-id write-batch-size) 
+                   (mapcat (fn [[pub coll]]
+                             (sequence (partition-xf pub write-batch-size) 
                                        coll))))
           final-output (sequence xf flattened)]
       (.clear ^java.util.ArrayList flattened)
