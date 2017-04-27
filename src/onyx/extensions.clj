@@ -99,6 +99,10 @@
 
 (defmulti internal-retry-segment (fn [messenger id peer-link] (type messenger)))
 
+;epidemic stuff
+
+(defmulti send-log-events (fn [messenger id peer-link]) (type messenger))
+
 ;; Monitoring interface
 
 (defmulti monitoring-agent :monitoring)

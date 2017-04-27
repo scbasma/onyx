@@ -15,10 +15,11 @@
            [io.aeron.driver MediaDriver MediaDriver$Context ThreadingMode]
            [io.aeron.logbuffer FragmentHandler]
            [org.agrona ErrorHandler]
-           [org.agrona.concurrent 
+           [org.agrona.concurrent
             UnsafeBuffer IdleStrategy BackoffIdleStrategy BusySpinIdleStrategy]
            [java.util.function Consumer]
-           [java.util.concurrent TimeUnit]))
+           [java.util.concurrent TimeUnit]
+           (onyx.messaging.epidemic_messenger EpidemicMessenger)))
 
 (defn aeron-channel [addr port]
   (format "aeron:udp?endpoint=%s:%s" addr port))
@@ -115,6 +116,11 @@
       (while (and (not @shutdown) (not @failed))
         (let [fragments-read (.poll ^Subscription subscription ^FragmentHandler handler ^int limit)]
           (.idle idle-strategy fragments-read))))))
+
+(defn handle-epidemic-message [decompress-f virtual-peers buffer offset length header]
+  ; will have to handle incoming log events, and write them to the appropriate channel.
+  (let [msg-type "epidemic"]
+    msg-type))
 
 (defn handle-message [decompress-f virtual-peers buffer offset length header]
   ;;; All de-serialization is now done in a single subscriber thread
@@ -420,3 +426,9 @@
     (let [pub-man (get-publication (:publication-pool messenger) conn-spec)
           buf (protocol/build-retry-msg-buf peer-task-id retry-id)]
       (pubm/write pub-man buf 0 protocol/retry-msg-length))))
+
+(defmethod extensions/send-log-event EpidemicMessenger
+  [messenger conn-spec log-event]
+  (let [pub-man (get-publication (:epidemic-publication-pool messenger) conn-spec)
+        buf ^UnsafeBuffer (protocol/build-log-event-buf (:compress-f messenger) (:peer-id conn-spec) log-event)]
+    (pubm/write pub-man buf 0 (.capacity buf))))

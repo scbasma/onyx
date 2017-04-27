@@ -179,3 +179,17 @@
                             (unchecked-add offset message-base-length))
                      (persistent! messages)))]
     segments))
+
+
+;epidemic stuff
+
+(defn build-log-event-buf [compress-f peer-id log-event]
+  (let [event-payload (compress-f log-event)
+        payload-size (alength event-payload)
+        buf-size (inc payload-size)
+        buf (UnsafeBuffer. (byte-array buf-size))
+        _ (.putBytes buf 0 event-payload)]
+    buf))
+
+(defn write-log-event-message [])
+(defn read-log-event-message [])
