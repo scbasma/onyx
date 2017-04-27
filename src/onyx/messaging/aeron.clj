@@ -160,7 +160,7 @@
                           {:msg-type msg-type})))))
 
 
-(defn start-subscriber! [shutdown bind-addr port stream-id virtual-peers decompress-f idle-strategy]
+(defn start-subscriber! [shutdown bind-addr port stream-id virtual-peers decompress-f idle-strategy handle-message-fn]
   (future 
    (loop []
      (let [failed (atom false)
@@ -173,7 +173,7 @@
            channel (aeron-channel bind-addr port)
            handler (fragment-data-handler
                     (fn [buffer offset length header]
-                      (handle-message decompress-f virtual-peers buffer offset length header)))
+                      (handle-message-fn decompress-f virtual-peers buffer offset length header)))
            subscription (.addSubscription conn channel stream-id)]
        (try (.accept ^Consumer (consumer handler idle-strategy 10 shutdown failed) subscription)
             (catch Throwable e 
@@ -223,7 +223,7 @@
           subscriber-count (arg-or-default :onyx.messaging.aeron/subscriber-count opts)
           shutdown (atom false)
           subscribers (mapv (fn [stream-id]
-                              (start-subscriber! shutdown bind-addr port stream-id virtual-peers decompress-f receive-idle-strategy))
+                              (start-subscriber! shutdown bind-addr port stream-id virtual-peers decompress-f receive-idle-strategy handle-message))
                             (range subscriber-count))]
       (when embedded-driver?
         (.addShutdownHook (Runtime/getRuntime)
