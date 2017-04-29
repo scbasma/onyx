@@ -2,6 +2,7 @@
   (:require [com.stuartsierra.component :as component]))
 
 (defn handle-epidemic-messages [])
+
 (defrecord EpidemicMessenger [messaging-group peer-config monitoring publication-group publications virtual-peers
                               send-idle-strategy compress-f publication-pool short-ids]
   component/Lifecycle

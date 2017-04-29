@@ -101,7 +101,7 @@
 
 ;epidemic stuff
 
-(defmulti send-log-events (fn [messenger id peer-link]) (type messenger))
+(defmulti send-log-events (fn [messenger id peer-link] (type messenger)))
 
 ;; Monitoring interface
 

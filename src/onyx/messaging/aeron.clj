@@ -10,7 +10,8 @@
             [onyx.types :refer [->MonitorEventBytes]]
             [onyx.extensions :as extensions]
             [onyx.compression.nippy :refer [messaging-compress messaging-decompress]]
-            [onyx.static.default-vals :refer [arg-or-default]])
+            [onyx.static.default-vals :refer [arg-or-default]]
+            [onyx.messaging.epidemic-messenger :refer [handle-epidemic-messages]])
   (:import [io.aeron Aeron Aeron$Context FragmentAssembler Publication Subscription]
            [io.aeron.driver MediaDriver MediaDriver$Context ThreadingMode]
            [io.aeron.logbuffer FragmentHandler]
@@ -230,7 +231,14 @@
           shutdown (atom false)
           subscribers (mapv (fn [stream-id]
                               (start-subscriber! shutdown bind-addr port stream-id virtual-peers decompress-f receive-idle-strategy handle-message))
-                            (range subscriber-count))]
+                            (range subscriber-count))
+          epidemic-port (inc port)
+          epidemic-external-channel (aeron-channel external-addr epidemic-port)
+          epidemic-publication-pool (component/start (pub-pool/new-publication-pool opts send-idle-strategy))
+          epidemic-stream-id 11
+          epidemic-shutdown (atom false)
+          epidemic-subscriber (start-subscriber! epidemic-shutdown bind-addr epidemic-port epidemic-stream-id virtual-peers
+                                                 decompress-f receive-idle-strategy handle-epidemic-messages)]
       (when embedded-driver?
         (.addShutdownHook (Runtime/getRuntime)
                           (Thread.
@@ -252,7 +260,13 @@
              :port port
              :send-idle-strategy send-idle-strategy
              :subscriber-count subscriber-count
-             :subscribers subscribers)))
+             :subscribers subscribers
+             :epidemic-external-channel epidemic-external-channel
+             :epidemic-publication-pool epidemic-publication-pool
+             :epidemic-shutdown epidemic-shutdown
+             :epidemic-port epidemic-port
+             :epidemic-subscriber epidemic-subscriber
+             :epidemic-stream-id epidemic-stream-id)))
 
   (stop [{:keys [media-driver media-driver-context subscribers publication-pool shutdown] :as component}]
     (taoensso.timbre/info "Stopping Aeron Peer Group")
@@ -325,6 +339,11 @@
   {:aeron/external-addr (:external-addr (:messaging-group messenger))
    :aeron/port (:port (:messaging-group messenger))})
 
+(defmethod extensions/peer-site EpidemicMessenger
+  [messenger]
+  {:aeron/external-addr (:external-addr (:messaging-group messenger))
+   :aeron/epidemic-port (:epidemic-port (:messaging-group messenger))})
+
 (defrecord AeronPeerConnection [channel stream-id acker-id peer-task-id])
 
 (defmethod extensions/connection-spec AeronMessenger
@@ -336,6 +355,12 @@
                                   (:external-addr (:messaging-group messenger))))
                        sub-count)]
     (->AeronPeerConnection (aeron-channel external-addr port) stream-id acker-id peer-task-id)))
+
+(defmethod extensions/connection-spec EpidemicMessenger
+  [messenger peer-id event {:keys [aeron/epidemic-external-addr aeron/epidemic-port]}]
+  (let [channel (:epidemic-external-channel (:messaging-group messenger))
+        stream-id (:epidemic-stream-id (:messaging-group messenger))]
+    (->AeronPeerConnection channel stream-id nil nil)))
 
 (defmethod extensions/receive-messages AeronMessenger
   [messenger {:keys [onyx.core/task-map onyx.core/messenger-buffer] :as event}]
@@ -427,8 +452,8 @@
           buf (protocol/build-retry-msg-buf peer-task-id retry-id)]
       (pubm/write pub-man buf 0 protocol/retry-msg-length))))
 
-(defmethod extensions/send-log-event EpidemicMessenger
-  [messenger conn-spec log-event]
-  (let [pub-man (get-publication (:epidemic-publication-pool messenger) conn-spec)
-        buf ^UnsafeBuffer (protocol/build-log-event-buf (:compress-f messenger) (:peer-id conn-spec) log-event)]
+(defmethod extensions/send-log-events EpidemicMessenger
+  [messenger log-event conn-spec]
+  (let [pub-man (get-publication (:publication-pool messenger) conn-spec)
+        buf ^UnsafeBuffer (protocol/build-log-event-buf (:compress-f messenger) log-event)]
     (pubm/write pub-man buf 0 (.capacity buf))))

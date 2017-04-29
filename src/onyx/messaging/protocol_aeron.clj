@@ -183,7 +183,7 @@
 
 ;epidemic stuff
 
-(defn build-log-event-buf [compress-f peer-id log-event]
+(defn build-log-event-buf [compress-f log-event]
   (let [event-payload (compress-f log-event)
         payload-size (alength event-payload)
         buf-size (inc payload-size)
