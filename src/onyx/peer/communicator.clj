@@ -1,5 +1,5 @@
 (ns onyx.peer.communicator
-  (:require [clojure.core.async :refer [>!! <!! alts!! promise-chan close! chan thread poll!]]
+  (:require [clojure.core.async :refer [>! >!! <!! alts!! promise-chan close! chan thread poll! put!]]
             [com.stuartsierra.component :as component]
             [taoensso.timbre :refer [info error warn fatal trace]]
             [onyx.static.logging-configuration :as logging-config]
@@ -14,7 +14,7 @@
       (try
        (trace "Log Writer: wrote - " entry)
        (extensions/write-log-entry log entry)
-       (>!! group-ch [:epidemic-log-event])
+       (put! group-ch [:epidemic-log-event entry])
        (catch Throwable e
          (warn e "Replica services couldn't write to ZooKeeper.")
          (>!! group-ch [:restart-peer-group])))

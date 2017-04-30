@@ -115,7 +115,13 @@
         (action [:start-peer-group]))
     state))
 
-(defmethod action :epidemic-log-event [event])
+(defmethod action :epidemic-log-event [state [type log-entry]]
+  (println (:epidemic-stream-id (:messaging-group state)))
+  (println (str "EPIDEMIC LOG EVENT " log-entry))
+  state)
+
+
+  ;;need to call some write action on epidemic publishers
 
 
 (defn safe-stop-vpeer! [vpeer-component]

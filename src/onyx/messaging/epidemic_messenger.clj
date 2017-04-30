@@ -12,7 +12,7 @@
                               send-idle-strategy compress-f publication-pool short-ids]
   component/Lifecycle
   (start [component]
-    (taoensso.timbre/info "Started Epidemic Aeron Messenger")
+    (taoensso.timbre/info "Starting Aeron Epidemic Messenger")
     (let [publication-pool (:epidemic-publication-pool messaging-group)
           send-idle-strategy (:send-idle-strategy messaging-group)
           compress-f (:compress-f messaging-group)
@@ -32,6 +32,7 @@
       :compress-f nil
       :decompress-f nil)))
 
-(defn epidemic-messenger [messaging-group peer-config])
+(defn epidemic-messenger [messaging-group peer-config]
+  (map->EpidemicMessenger {:peer-config peer-config :messaging-group messaging-group}))
 
 

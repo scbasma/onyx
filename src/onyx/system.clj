@@ -9,6 +9,7 @@
             [onyx.peer.peer-group-manager :as pgm]
             [onyx.messaging.acking-daemon :refer [acking-daemon]]
             [onyx.messaging.aeron :as am]
+            [onyx.messaging.epidemic-messenger :as epm]
             [onyx.messaging.messenger-buffer :as buffer]
             [onyx.monitoring.no-op-monitoring]
             [onyx.monitoring.custom-monitoring]
@@ -64,7 +65,7 @@
 
 (def peer-group-components [:logging-config :monitoring :query-server :messaging-group :peer-group-manager])
 
-(def peer-components [:messenger :acking-daemon :virtual-peer])
+(def peer-components [:messenger :acking-daemon :virtual-peer :epidemic-messenger])
 
 (def task-components [:task-lifecycle :register-messenger-peer
                       :messenger-buffer :backpressure-poll
@@ -177,8 +178,7 @@
                       :task-monitoring
                       :register-messenger-peer])}))
 
-(defn onyx-vpeer-system
-  [group-ch outbox-ch peer-config messaging-group monitoring log group-id vpeer-id]
+(defn onyx-vpeer-system [group-ch outbox-ch peer-config messaging-group monitoring log group-id vpeer-id]
    (map->OnyxPeer
     {:group-id group-id
      :messaging-group messaging-group
@@ -190,6 +190,9 @@
      :messenger (component/using
                  (am/aeron-messenger peer-config messaging-group)
                  [:monitoring :acking-daemon])
+     :epidemic-messenger (component/using
+                           (epm/epidemic-messenger peer-config messaging-group)
+                           [:monitoring])
      :virtual-peer (component/using
                     (virtual-peer group-ch outbox-ch log peer-config onyx-task vpeer-id)
                     [:group-id :messaging-group :monitoring :acking-daemon
