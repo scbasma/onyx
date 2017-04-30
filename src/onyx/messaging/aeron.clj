@@ -118,11 +118,6 @@
         (let [fragments-read (.poll ^Subscription subscription ^FragmentHandler handler ^int limit)]
           (.idle idle-strategy fragments-read))))))
 
-(defn handle-epidemic-message [decompress-f virtual-peers buffer offset length header]
-  ; will have to handle incoming log events, and write them to the appropriate channel.
-  (let [msg-type "epidemic"]
-    msg-type))
-
 (defn handle-message [decompress-f virtual-peers buffer offset length header]
   ;;; All de-serialization is now done in a single subscriber thread
   ;;; If a job is serialization heavy, additional subscriber threads can be created

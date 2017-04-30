@@ -1,6 +1,7 @@
 (ns ^:no-doc onyx.messaging.protocol-aeron
   (:require [taoensso.timbre :as timbre]
-            [onyx.types :refer [->Leaf ->Ack]])
+            [onyx.types :refer [->Leaf ->Ack]]
+            [taoensso.nippy :as nippy])
   (:import [java.util UUID]
            [org.agrona.concurrent UnsafeBuffer]
            [org.agrona DirectBuffer MutableDirectBuffer]))
@@ -24,6 +25,7 @@
 (def ^:const ack-msg-id (byte 2))
 (def ^:const messages-msg-id (byte 3))
 (def ^:const batched-ack-msg-id (byte 4))
+(def ^:const epidemic-message-id (byte 5))
 
 (def ^:const short-size (long 2))
 
@@ -184,12 +186,15 @@
 ;epidemic stuff
 
 (defn build-log-event-buf [compress-f log-event]
-  (let [event-payload (compress-f log-event)
+  (let [event-payload (nippy/fast-freeze log-event)
         payload-size (alength event-payload)
         buf-size (inc payload-size)
         buf (UnsafeBuffer. (byte-array buf-size))
         _ (.putBytes buf 0 event-payload)]
     buf))
 
-(defn write-log-event-message [])
-(defn read-log-event-message [])
+(defn read-log-event-message [buffer offset length]
+  (let [bs (byte-array length)
+        ret (.getBytes ^UnsafeBuffer buffer offset bs)]
+    (String. bs)))
+

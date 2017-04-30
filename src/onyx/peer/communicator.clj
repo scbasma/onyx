@@ -14,6 +14,7 @@
       (try
        (trace "Log Writer: wrote - " entry)
        (extensions/write-log-entry log entry)
+       (>!! group-ch [:epidemic-log-event])
        (catch Throwable e
          (warn e "Replica services couldn't write to ZooKeeper.")
          (>!! group-ch [:restart-peer-group])))
@@ -80,10 +81,10 @@
 
 (defn onyx-comm
   [peer-config group-ch monitoring]
-   (map->OnyxComm
-    {:config peer-config
-     :logging-config (logging-config/logging-configuration peer-config)
-     :monitoring monitoring
-     :log (component/using (zookeeper peer-config) [:monitoring])
-     :replica-subscription (component/using (replica-subscription peer-config) [:log])
-     :log-writer (component/using (log-writer peer-config group-ch) [:log])}))
+  (map->OnyxComm
+   {:config peer-config
+    :logging-config (logging-config/logging-configuration peer-config)
+    :monitoring monitoring
+    :log (component/using (zookeeper peer-config) [:monitoring])
+    :replica-subscription (component/using (replica-subscription peer-config) [:log])
+    :log-writer (component/using (log-writer peer-config group-ch) [:log])}))

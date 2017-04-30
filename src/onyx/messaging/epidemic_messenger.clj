@@ -1,7 +1,12 @@
 (ns onyx.messaging.epidemic-messenger
-  (:require [com.stuartsierra.component :as component]))
+  (:require [com.stuartsierra.component :as component]
+            [onyx.messaging.protocol-aeron :as protocol]))
 
-(defn handle-epidemic-messages [])
+
+(defn handle-epidemic-messages [decompress-f virtual-peers buffer offset length header]
+  ; will have to handle incoming log events, and write them to the appropriate channel.
+  (let [msg (protocol/read-log-event-message buffer offset length)]
+    (taoensso.timbre/info (str "RECEIVED EPIDEMIC MESSAGE: " msg))))
 
 (defrecord EpidemicMessenger [messaging-group peer-config monitoring publication-group publications virtual-peers
                               send-idle-strategy compress-f publication-pool short-ids]

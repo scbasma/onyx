@@ -115,6 +115,9 @@
         (action [:start-peer-group]))
     state))
 
+(defmethod action :epidemic-log-event [event])
+
+
 (defn safe-stop-vpeer! [vpeer-component]
   (when vpeer-component
     (try
