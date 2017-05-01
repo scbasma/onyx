@@ -186,7 +186,7 @@
 ;epidemic stuff
 
 (defn build-log-event-buf [compress-f log-event]
-  (let [event-payload (nippy/fast-freeze log-event)
+  (let [event-payload ^bytes (nippy/fast-freeze (str log-event))
         payload-size (alength event-payload)
         buf-size (inc payload-size)
         buf (UnsafeBuffer. (byte-array buf-size))
@@ -194,7 +194,7 @@
     buf))
 
 (defn read-log-event-message [buffer offset length]
-  (let [bs (byte-array length)
+  (let [bs ^bytes (byte-array length)
         ret (.getBytes ^UnsafeBuffer buffer offset bs)]
-    (String. bs)))
+    (String. (nippy/fast-thaw bs))))
 

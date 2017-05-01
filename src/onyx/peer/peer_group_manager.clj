@@ -117,7 +117,7 @@
 
 (defmethod action :epidemic-log-event [state [type log-entry]]
   ;(println (:epidemic-stream-id (:messaging-group state)))
-  (println (str "EPIDEMIC LOG EVENT " log-entry))
+  ;(println (str "EPIDEMIC LOG EVENT " log-entry))
   (let [messenger (:epidemic-messenger state)
         conn-spec (extensions/connection-spec messenger nil nil nil)]
     (extensions/send-log-events messenger log-entry conn-spec))

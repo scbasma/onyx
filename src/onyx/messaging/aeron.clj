@@ -231,7 +231,7 @@
           epidemic-external-channel (aeron-channel external-addr epidemic-port)
           epidemic-publication-pool (component/start (pub-pool/new-publication-pool opts send-idle-strategy))
           epidemic-stream-id 11
-          epidemic-shutdown (atom false)
+          epidemic-shutdown shutdown
           epidemic-subscriber (start-subscriber! epidemic-shutdown bind-addr epidemic-port epidemic-stream-id virtual-peers
                                                  decompress-f receive-idle-strategy handle-epidemic-messages)]
       (when embedded-driver?
