@@ -116,8 +116,11 @@
     state))
 
 (defmethod action :epidemic-log-event [state [type log-entry]]
-  (println (:epidemic-stream-id (:messaging-group state)))
+  ;(println (:epidemic-stream-id (:messaging-group state)))
   (println (str "EPIDEMIC LOG EVENT " log-entry))
+  (let [messenger (:epidemic-messenger state)
+        conn-spec (extensions/connection-spec messenger nil nil nil)]
+    (extensions/send-log-events messenger log-entry conn-spec))
   state)
 
 
@@ -242,7 +245,7 @@
 
 (defrecord PeerGroupManager [peer-config onyx-vpeer-system-fn]
   component/Lifecycle
-  (start [{:keys [monitoring query-server messaging-group] :as component}]
+  (start [{:keys [monitoring query-server messaging-group epidemic-messenger] :as component}]
     (let [group-ch (chan 1000)
           shutdown-ch (chan 1)
           thread-ch (thread 
@@ -260,6 +263,7 @@
                                                :group-ch group-ch
                                                :messaging-group messaging-group
                                                :monitoring monitoring
+                                               :epidemic-messenger epidemic-messenger
                                                :query-server query-server
                                                :peer-owners {}
                                                :vpeers {}})

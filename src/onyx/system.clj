@@ -63,9 +63,10 @@
 
 (def development-components [:monitoring :logging-config :log :bookkeeper])
 
-(def peer-group-components [:logging-config :monitoring :query-server :messaging-group :peer-group-manager])
+(def peer-group-components [:logging-config :monitoring :query-server
+                            :messaging-group :epidemic-messenger :peer-group-manager])
 
-(def peer-components [:messenger :acking-daemon :virtual-peer :epidemic-messenger])
+(def peer-components [:messenger :acking-daemon :virtual-peer])
 
 (def task-components [:task-lifecycle :register-messenger-peer
                       :messenger-buffer :backpressure-poll
@@ -190,9 +191,6 @@
      :messenger (component/using
                  (am/aeron-messenger peer-config messaging-group)
                  [:monitoring :acking-daemon])
-     :epidemic-messenger (component/using
-                           (epm/epidemic-messenger peer-config messaging-group)
-                           [:monitoring])
      :virtual-peer (component/using
                     (virtual-peer group-ch outbox-ch log peer-config onyx-task vpeer-id)
                     [:group-id :messaging-group :monitoring :acking-daemon
@@ -208,8 +206,12 @@
      :monitoring (component/using (extensions/monitoring-agent monitoring-config) [:logging-config])
      :messaging-group (component/using (am/aeron-peer-group peer-config) [:logging-config])
      :query-server (component/using (qs/query-server peer-config) [:logging-config])
+     :epidemic-messenger (component/using
+                           (epm/epidemic-messenger peer-config)
+                           [:monitoring :messaging-group])
      :peer-group-manager (component/using (pgm/peer-group-manager peer-config onyx-vpeer-system)
-                                          [:logging-config :monitoring :messaging-group :query-server])}))
+                                          [:logging-config :monitoring :messaging-group :query-server
+                                           :epidemic-messenger])}))
 
 (defmethod clojure.core/print-method OnyxPeer
   [system ^java.io.Writer writer]

@@ -5,13 +5,15 @@
 
 (defn handle-epidemic-messages [decompress-f virtual-peers buffer offset length header]
   ; will have to handle incoming log events, and write them to the appropriate channel.
+  (println "inside handle-epidemic-messages!")
   (let [msg (protocol/read-log-event-message buffer offset length)]
+    (println str ("received epidemic message" msg))
     (taoensso.timbre/info (str "RECEIVED EPIDEMIC MESSAGE: " msg))))
 
-(defrecord EpidemicMessenger [messaging-group peer-config monitoring publication-group publications virtual-peers
+(defrecord EpidemicMessenger [peer-config monitoring publication-group publications virtual-peers
                               send-idle-strategy compress-f publication-pool short-ids]
   component/Lifecycle
-  (start [component]
+  (start [{:keys [messaging-group] :as component}]
     (taoensso.timbre/info "Starting Aeron Epidemic Messenger")
     (let [publication-pool (:epidemic-publication-pool messaging-group)
           send-idle-strategy (:send-idle-strategy messaging-group)
@@ -32,7 +34,7 @@
       :compress-f nil
       :decompress-f nil)))
 
-(defn epidemic-messenger [messaging-group peer-config]
-  (map->EpidemicMessenger {:peer-config peer-config :messaging-group messaging-group}))
+(defn epidemic-messenger [peer-config]
+  (map->EpidemicMessenger {:peer-config peer-config}))
 
 
