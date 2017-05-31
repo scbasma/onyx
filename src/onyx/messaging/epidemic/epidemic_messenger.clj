@@ -1,4 +1,4 @@
-(ns onyx.messaging.epidemic-messenger
+(ns onyx.messaging.epidemic.epidemic-messenger
   (:require [com.stuartsierra.component :as component]
             [onyx.messaging.protocol-aeron :as protocol]))
 
@@ -9,18 +9,19 @@
   (let [msg (protocol/read-log-event-message buffer offset length)]
     (println  (str "received epidemic message: " msg))))
 
+
 (defrecord EpidemicMessenger [peer-config monitoring publication-group publications virtual-peers
                               send-idle-strategy compress-f publication-pool short-ids]
   component/Lifecycle
-  (start [{:keys [messaging-group] :as component}]
+  (start [{:keys [epidemic-messaging-group] :as component}]
     (taoensso.timbre/info "Starting Aeron Epidemic Messenger")
-    (let [publication-pool (:epidemic-publication-pool messaging-group)
-          send-idle-strategy (:send-idle-strategy messaging-group)
-          compress-f (:compress-f messaging-group)
-          virtual-peers (:virtual-peers messaging-group)
-          decompress-f (:decompress-f messaging-group)]
+    (let [publication-pool (:publication-pool epidemic-messaging-group)
+          send-idle-strategy (:send-idle-strategy epidemic-messaging-group)
+          compress-f (:compress-f epidemic-messaging-group)
+          virtual-peers (:virtual-peers epidemic-messaging-group)
+          decompress-f (:decompress-f epidemic-messaging-group)]
       (assoc component
-        :messaging-group messaging-group
+        :messaging-group epidemic-messaging-group
         :publication-pool publication-pool
         :send-idle-strategy send-idle-strategy
         :compress-f compress-f

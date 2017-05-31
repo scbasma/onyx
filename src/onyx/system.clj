@@ -9,7 +9,8 @@
             [onyx.peer.peer-group-manager :as pgm]
             [onyx.messaging.acking-daemon :refer [acking-daemon]]
             [onyx.messaging.aeron :as am]
-            [onyx.messaging.epidemic-messenger :as epm]
+            [onyx.messaging.epidemic.epidemic-messenger :as epm]
+            [onyx.messaging.epidemic.epidemic-peer-group :as epg]
             [onyx.messaging.messenger-buffer :as buffer]
             [onyx.monitoring.no-op-monitoring]
             [onyx.monitoring.custom-monitoring]
@@ -64,7 +65,7 @@
 (def development-components [:monitoring :logging-config :log :bookkeeper])
 
 (def peer-group-components [:logging-config :monitoring :query-server
-                            :messaging-group :epidemic-messenger :peer-group-manager])
+                            :messaging-group :epidemic-messaging-group :epidemic-messenger :peer-group-manager])
 
 (def peer-components [:messenger :acking-daemon :virtual-peer])
 
@@ -179,10 +180,12 @@
                       :task-monitoring
                       :register-messenger-peer])}))
 
-(defn onyx-vpeer-system [group-ch outbox-ch peer-config messaging-group monitoring log group-id vpeer-id]
+(defn onyx-vpeer-system [group-ch outbox-ch peer-config messaging-group epidemic-messaging-group
+                         epidemic-messenger monitoring log group-id vpeer-id]
    (map->OnyxPeer
     {:group-id group-id
      :messaging-group messaging-group
+     :epidemic-messaging-group epidemic-messaging-group
      :logging-config (logging-config/logging-configuration peer-config)
      :monitoring monitoring 
      :acking-daemon (component/using
@@ -191,6 +194,7 @@
      :messenger (component/using
                  (am/aeron-messenger peer-config messaging-group)
                  [:monitoring :acking-daemon])
+     :epidemic-messenger epidemic-messenger
      :virtual-peer (component/using
                     (virtual-peer group-ch outbox-ch log peer-config onyx-task vpeer-id)
                     [:group-id :messaging-group :monitoring :acking-daemon
@@ -205,13 +209,12 @@
      :logging-config (logging-config/logging-configuration peer-config)
      :monitoring (component/using (extensions/monitoring-agent monitoring-config) [:logging-config])
      :messaging-group (component/using (am/aeron-peer-group peer-config) [:logging-config])
+     :epidemic-messaging-group (component/using (epg/epidemic-peer-group peer-config) [:messaging-group])
+     :epidemic-messenger (component/using (epm/epidemic-messenger peer-config) [:monitoring :epidemic-messaging-group])
      :query-server (component/using (qs/query-server peer-config) [:logging-config])
-     :epidemic-messenger (component/using
-                           (epm/epidemic-messenger peer-config)
-                           [:monitoring :messaging-group])
      :peer-group-manager (component/using (pgm/peer-group-manager peer-config onyx-vpeer-system)
-                                          [:logging-config :monitoring :messaging-group :query-server
-                                           :epidemic-messenger])}))
+                                          [:logging-config :monitoring :messaging-group :epidemic-messaging-group :epidemic-messenger :query-server])}))
+
 
 (defmethod clojure.core/print-method OnyxPeer
   [system ^java.io.Writer writer]

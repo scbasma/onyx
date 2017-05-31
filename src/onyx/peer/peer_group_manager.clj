@@ -27,7 +27,8 @@
              annotated-rs (mapv #(annotate-reaction entry id %) rs)
              new-peer-view (extensions/peer-replica-view log entry old-replica new-replica 
                                                          @peer-replica-view diff peer-state peer-config)
-             new-state (extensions/fire-side-effects! entry old-replica new-replica diff peer-state)]
+             new-state (extensions/fire-side-effects! entry old-replica new-replica diff peer-state)
+             _ (println (str "!! new peer view in transition-peers: " (:peer-sites new-peer-view)))]
          (reset! (:replica peer-state) new-replica)
          (reset! (:peer-replica-view peer-state) new-peer-view)
          (-> result
@@ -155,14 +156,15 @@
 
 (defmethod action :start-peer
   [{:keys [peer-config vpeer-system-fn group-state monitoring 
-           connected? messaging-group comm group-ch outbox-ch] :as state} 
+           connected? messaging-group epidemic-messaging-group epidemic-messenger comm group-ch outbox-ch] :as state}
    [type peer-owner-id]]
   (if connected?
     (let [vpeer-id (java.util.UUID/randomUUID)
           group-id (:id group-state)
           log (:log comm) 
           vpeer (component/start (vpeer-system-fn group-ch outbox-ch peer-config 
-                                                  messaging-group monitoring log group-id vpeer-id))] 
+                                                  messaging-group epidemic-messaging-group epidemic-messenger monitoring
+                                                  log group-id vpeer-id))]
       (-> state 
           (assoc-in [:vpeers vpeer-id] vpeer)
           (assoc-in [:peer-owners peer-owner-id] vpeer-id)))
@@ -245,7 +247,7 @@
 
 (defrecord PeerGroupManager [peer-config onyx-vpeer-system-fn]
   component/Lifecycle
-  (start [{:keys [monitoring query-server messaging-group epidemic-messenger] :as component}]
+  (start [{:keys [monitoring query-server messaging-group epidemic-messaging-group epidemic-messenger] :as component}]
     (let [group-ch (chan 1000)
           shutdown-ch (chan 1)
           thread-ch (thread 
@@ -263,6 +265,7 @@
                                                :group-ch group-ch
                                                :messaging-group messaging-group
                                                :monitoring monitoring
+                                               :epidemic-messaging-group epidemic-messaging-group
                                                :epidemic-messenger epidemic-messenger
                                                :query-server query-server
                                                :peer-owners {}

@@ -11,7 +11,8 @@
             [onyx.extensions :as extensions]
             [onyx.compression.nippy :refer [messaging-compress messaging-decompress]]
             [onyx.static.default-vals :refer [arg-or-default]]
-            [onyx.messaging.epidemic-messenger :refer [handle-epidemic-messages]])
+            [onyx.messaging.epidemic.epidemic-messenger :refer [handle-epidemic-messages]]
+            [onyx.messaging.epidemic.epidemic-peer-group :as epg])
   (:import [io.aeron Aeron Aeron$Context FragmentAssembler Publication Subscription]
            [io.aeron.driver MediaDriver MediaDriver$Context ThreadingMode]
            [io.aeron.logbuffer FragmentHandler]
@@ -20,7 +21,8 @@
             UnsafeBuffer IdleStrategy BackoffIdleStrategy BusySpinIdleStrategy]
            [java.util.function Consumer]
            [java.util.concurrent TimeUnit]
-           (onyx.messaging.epidemic_messenger EpidemicMessenger)))
+           (onyx.messaging.epidemic.epidemic_messenger EpidemicMessenger)))
+
 
 (defn aeron-channel [addr port]
   (format "aeron:udp?endpoint=%s:%s" addr port))
@@ -227,13 +229,7 @@
           subscribers (mapv (fn [stream-id]
                               (start-subscriber! shutdown bind-addr port stream-id virtual-peers decompress-f receive-idle-strategy handle-message))
                             (range subscriber-count))
-          epidemic-port (inc port)
-          epidemic-external-channel (aeron-channel external-addr epidemic-port)
-          epidemic-publication-pool (component/start (pub-pool/new-publication-pool opts send-idle-strategy))
-          epidemic-stream-id 11
-          epidemic-shutdown shutdown
-          epidemic-subscriber (start-subscriber! epidemic-shutdown bind-addr epidemic-port epidemic-stream-id virtual-peers
-                                                 decompress-f receive-idle-strategy handle-epidemic-messages)]
+          start-subscriber-fn start-subscriber!]
       (when embedded-driver?
         (.addShutdownHook (Runtime/getRuntime)
                           (Thread.
@@ -256,12 +252,8 @@
              :send-idle-strategy send-idle-strategy
              :subscriber-count subscriber-count
              :subscribers subscribers
-             :epidemic-external-channel epidemic-external-channel
-             :epidemic-publication-pool epidemic-publication-pool
-             :epidemic-shutdown epidemic-shutdown
-             :epidemic-port epidemic-port
-             :epidemic-subscriber epidemic-subscriber
-             :epidemic-stream-id epidemic-stream-id)))
+             :start-subscriber-fn start-subscriber-fn)))
+
 
   (stop [{:keys [media-driver media-driver-context subscribers publication-pool shutdown] :as component}]
     (taoensso.timbre/info "Stopping Aeron Peer Group")
