@@ -50,12 +50,19 @@
   (connect [this]
     (warn "Connecting to nil publication manager, likely due to timeout on creation.")))
 
+
+(def count-pending-ch (atom -1))
+
+(defn inc-count-pending-ch []
+  (swap! count-pending-ch inc))
+
 (defrecord PublicationManager [channel stream-id send-idle-strategy connection publication pending-ch write-fut cleanup-fn]
   PPublicationManager
   (start [this]
     (assoc this :write-fut (future (write-from-buffer this pending-ch send-idle-strategy))))
 
   (write [this buf start end]
+    (inc-count-pending-ch)
     ;; use core.async offer! here and call monitoring when blocked
     ;; will only be possible when core.async releases master again
     (>!! pending-ch (->Message buf start end)))

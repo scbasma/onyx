@@ -79,12 +79,12 @@
 
 (defn load-config
   ([]
-     (load-config "test-config.edn"))
+   (load-config "test-config.edn"))
   ([filename]
-     (let [impl (System/getenv "TEST_TRANSPORT_IMPL")]
-       (cond-> (read-string (slurp (clojure.java.io/resource filename)))
-               (= impl "aeron")
-               (assoc-in [:peer-config :onyx.messaging/impl] :aeron)))))
+   (let [impl (System/getenv "TEST_TRANSPORT_IMPL")]
+     (cond-> (read-string (slurp (clojure.java.io/resource filename)))
+             (= impl "aeron")
+             (assoc-in [:peer-config :onyx.messaging/impl] :aeron)))))
 
 (defn try-start-env [env-config]
   (try
@@ -95,6 +95,7 @@
 
 (defn try-start-group [peer-config]
   (try
+    (println "inside try-start-group!!")
     (onyx.api/start-peer-group peer-config)
     (catch InterruptedException e)
     (catch Throwable e
@@ -103,7 +104,9 @@
 (defn try-start-peers 
   [n-peers peer-group]
   (try
+    (println "inside try-start-peers")
    (onyx.api/start-peers n-peers peer-group)
+   (println "after api/start-peers")
    (catch InterruptedException e)
    (catch Throwable e
      (throw e))))
@@ -131,6 +134,7 @@
 (defrecord TestPeers [n-peers peer-group peers]
   component/Lifecycle
   (start [component]
+    (println "Inside TestPEERs")
     (assoc component :peers (atom (try-start-peers n-peers peer-group))))
   (stop [component]
     (doseq [v-peer @peers]
@@ -169,7 +173,9 @@
                            :peer-group peer-group#
                            :peers (:peers test-peers#)}]
          (try
+           (println "before with-fn-validation")
            (s/with-fn-validation ~@body)
+           (println "after with-fn-validation")
            (catch InterruptedException e#
              (Thread/interrupted))
            (catch ThreadDeath e#

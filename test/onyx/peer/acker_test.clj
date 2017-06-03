@@ -31,7 +31,8 @@
   (let [id (java.util.UUID/randomUUID)
         config (load-config)
         env-config (assoc (:env-config config) :onyx/tenancy-id id)
-        peer-config (assoc (:peer-config config) :onyx/tenancy-id id)]
+        peer-config (assoc (:peer-config config) :onyx/tenancy-id id)
+        _ (println "Inside test multiple ackers")]
     (with-test-env [test-env [4 env-config peer-config]]
       (let [batch-size 40
             catalog [{:onyx/name :in
@@ -77,7 +78,7 @@
         (doseq [n (range n-messages)]
           (>!! @in-chan {:n n}))
         (>!! @in-chan :done)
-
+        (println "before submit-job in acker-test")
         (onyx.api/submit-job
           peer-config
           {:catalog catalog
@@ -88,8 +89,12 @@
            :acker/exempt-input-tasks? true
            :acker/exempt-output-tasks? true
            :acker/exempt-tasks [:inc]})
+        (println "after submit-job!")
 
-        (let [results (doall (repeatedly (inc n-messages) (fn [] (<!! @out-chan))))
-              expected (set (map (fn [x] {:n (inc x)}) (range n-messages)))]
+        (let [_ (println "before results and expected!!")
+              results (doall (repeatedly (inc n-messages) (fn [] (<!! @out-chan))))
+              _ (println "after results!")
+              expected (set (map (fn [x] {:n (inc x)}) (range n-messages)))
+              _ (println "inside results and expected!!")]
           (is (= expected (set (butlast results))))
           (is (= :done (last results))))))))

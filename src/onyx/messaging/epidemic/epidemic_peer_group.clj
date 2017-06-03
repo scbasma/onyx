@@ -1,8 +1,7 @@
 (ns onyx.messaging.epidemic.epidemic-peer-group
   (:require [com.stuartsierra.component :as component]
-            [onyx.messaging.epidemic.epidemic-messenger :as epm :refer [handle-epidemic-messages]]
-            [onyx.messaging.aeron.publication-pool :as pp]))
-
+            [onyx.messaging.protocol-aeron :as protocol]
+            [onyx.messaging.aeron.publication-pool :as pub-pool]))
 
 ; this record is tasked with tracking the subcriber and publication-groups.
 
@@ -13,7 +12,7 @@
 
 (defrecord EpidemicPeerGroup [opts virtual-peers send-idle-strategy receive-idle-strategy
                               decompress-f compress-f bind-addr external-addr shutdown publication-pool
-                              start-subscriber-fn external-channel port stream-pool subscribers epidemic-publications]
+                              start-subscriber-fn external-channel port stream-pool subscribers]
   component/Lifecycle
   (start [{:keys [messaging-group] :as component}]
     (let [
@@ -30,9 +29,9 @@
           external-channel (:external-channel messaging-group)
           port (:port messaging-group)
           ;epidemic-stream-pool need to be implemented after specifications
-          stream-pool 11
-          subscribers (start-subscriber-fn shutdown bind-addr port stream-pool  virtual-peers
-                                           decompress-f receive-idle-strategy handle-epidemic-messages)]
+          stream-pool 11]
+          ;subscribers (start-subscriber-fn shutdown bind-addr port stream-pool virtual-peers
+          ;                                 decompress-f receive-idle-strategy handle-epidemic-messages]
       (assoc component
         :port port
         :virtual-peers virtual-peers
@@ -47,7 +46,8 @@
         :stream-pool stream-pool
         :publication-pool publication-pool
         :subscribers subscribers)))
-  (stop [component]
+  (stop [{:keys [port virtual-peers send-idle-strategy receive-idle-strategy decompress-f bind-addr external-addr
+                 external-channel shutdown start-subscriber-fn stream-pool publication-pool subscribers] :as component}]
     (assoc component
       :port nil
       :virtual-peers nil

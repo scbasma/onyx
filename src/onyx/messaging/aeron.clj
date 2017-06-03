@@ -11,8 +11,7 @@
             [onyx.extensions :as extensions]
             [onyx.compression.nippy :refer [messaging-compress messaging-decompress]]
             [onyx.static.default-vals :refer [arg-or-default]]
-            [onyx.messaging.epidemic.epidemic-messenger :refer [handle-epidemic-messages]]
-            [onyx.messaging.epidemic.epidemic-peer-group :as epg])
+            [onyx.messaging.epidemic.epidemic-messenger])
   (:import [io.aeron Aeron Aeron$Context FragmentAssembler Publication Subscription]
            [io.aeron.driver MediaDriver MediaDriver$Context ThreadingMode]
            [io.aeron.logbuffer FragmentHandler]
@@ -165,6 +164,7 @@
 
 
 (defn start-subscriber! [shutdown bind-addr port stream-id virtual-peers decompress-f idle-strategy handle-message-fn]
+  (println (str "starting subscriber with stream-id: " stream-id " and bind-addr: " bind-addr " and port: " port))
   (future 
    (loop []
      (let [failed (atom false)
@@ -179,9 +179,12 @@
                     (fn [buffer offset length header]
                       (handle-message-fn decompress-f virtual-peers buffer offset length header)))
            subscription (.addSubscription conn channel stream-id)]
+           ;_ (println (str "subscription added with fn: " handle-message-fn " and stream-id: " stream-id))]
        (try (.accept ^Consumer (consumer handler idle-strategy 10 shutdown failed) subscription)
             (catch Throwable e 
               (reset! failed true)
+              (println (str "Subscription failed with stream-id: " stream-id " because " e))
+              (println (str "Handler: " handler " idle-strategy: " idle-strategy " shutdown: " shutdown))
               (warn "Subscriber failed. Restarting." e))
             (finally
              (.close subscription)
@@ -229,7 +232,15 @@
           subscribers (mapv (fn [stream-id]
                               (start-subscriber! shutdown bind-addr port stream-id virtual-peers decompress-f receive-idle-strategy handle-message))
                             (range subscriber-count))
-          start-subscriber-fn start-subscriber!]
+          start-subscriber-fn start-subscriber!
+          epidemic-port (inc port)
+          epidemic-external-channel (aeron-channel external-addr epidemic-port)
+          epidemic-publication-pool publication-pool
+          epidemic-stream-pool 11
+          epidemic-shutdown shutdown]
+          ;epidemic-subscribers (start-subscriber! epidemic-shutdown bind-addr epidemic-port epidemic-stream-pool virtual-peers
+                                             ;decompress-f receive-idle-strategy handle-epidemic-messages
+
       (when embedded-driver?
         (.addShutdownHook (Runtime/getRuntime)
                           (Thread.
@@ -250,9 +261,11 @@
              :shutdown shutdown
              :port port
              :send-idle-strategy send-idle-strategy
+             :receive-idle-strategy receive-idle-strategy
              :subscriber-count subscriber-count
              :subscribers subscribers
              :start-subscriber-fn start-subscriber-fn)))
+
 
 
   (stop [{:keys [media-driver media-driver-context subscribers publication-pool shutdown] :as component}]
@@ -269,6 +282,7 @@
            :external-channel nil
            :subscriber-count nil
            :compress-f nil :decompress-f nil :send-idle-strategy nil
+           :receive-idle-strategy nil
            :subscribers nil)))
 
 (defmethod clojure.core/print-method AeronPeerGroup
@@ -345,8 +359,8 @@
 
 (defmethod extensions/connection-spec EpidemicMessenger
   [messenger peer-id event {:keys [aeron/epidemic-external-addr aeron/epidemic-port]}]
-  (let [channel (:epidemic-external-channel (:messaging-group messenger))
-        stream-id (:epidemic-stream-id (:messaging-group messenger))]
+  (let [channel (:external-channel messenger)
+        stream-id (:epidemic-publisher-stream-id messenger)]
     (->AeronPeerConnection channel stream-id nil nil)))
 
 (defmethod extensions/receive-messages AeronMessenger
@@ -439,8 +453,17 @@
           buf (protocol/build-retry-msg-buf peer-task-id retry-id)]
       (pubm/write pub-man buf 0 protocol/retry-msg-length))))
 
+(def log-event-counter (atom -1))
+(defn inc-counter []
+  (swap! log-event-counter inc))
+
 (defmethod extensions/send-log-events EpidemicMessenger
   [messenger log-event conn-spec]
+  (println (str "Messenger: " messenger))
+  (println (str "Messenger publication pool: " (:publication-pool messenger)))
+  (inc-counter)
+  (println (str "MESSAGES SENT: " @log-event-counter))
   (let [pub-man (get-publication (:publication-pool messenger) conn-spec)
         buf ^UnsafeBuffer (protocol/build-log-event-buf (:compress-f messenger) log-event)]
-    (pubm/write pub-man buf 0 (.capacity buf))))
+    (pubm/write pub-man buf 0 (.capacity buf)))
+  (println "Finished writing!"))

@@ -1,5 +1,5 @@
 (ns onyx.peer.peer-group-manager
-  (:require [clojure.core.async :refer [>!! <!! alts!! promise-chan close! chan thread poll!]]
+  (:require [clojure.core.async :refer [>!! <!! alts!! promise-chan close! chan thread poll! go]]
             [com.stuartsierra.component :as component]
             [taoensso.timbre :refer [info error warn fatal]]
             [onyx.log.entry :refer [create-log-entry]]
@@ -27,8 +27,7 @@
              annotated-rs (mapv #(annotate-reaction entry id %) rs)
              new-peer-view (extensions/peer-replica-view log entry old-replica new-replica 
                                                          @peer-replica-view diff peer-state peer-config)
-             new-state (extensions/fire-side-effects! entry old-replica new-replica diff peer-state)
-             _ (println (str "!! new peer view in transition-peers: " (:peer-sites new-peer-view)))]
+             new-state (extensions/fire-side-effects! entry old-replica new-replica diff peer-state)]
          (reset! (:replica peer-state) new-replica)
          (reset! (:peer-replica-view peer-state) new-peer-view)
          (-> result
@@ -117,10 +116,9 @@
     state))
 
 (defmethod action :epidemic-log-event [state [type log-entry]]
-  ;(println (:epidemic-stream-id (:messaging-group state)))
-  ;(println (str "EPIDEMIC LOG EVENT " log-entry))
   (let [messenger (:epidemic-messenger state)
-        conn-spec (extensions/connection-spec messenger nil nil nil)]
+        conn-spec (extensions/connection-spec messenger nil nil nil)
+        _ (println (str "This is the log event: " log-entry))]
     (extensions/send-log-events messenger log-entry conn-spec))
   state)
 
@@ -156,14 +154,14 @@
 
 (defmethod action :start-peer
   [{:keys [peer-config vpeer-system-fn group-state monitoring 
-           connected? messaging-group epidemic-messaging-group epidemic-messenger comm group-ch outbox-ch] :as state}
+           connected? messaging-group epidemic-messenger comm group-ch outbox-ch] :as state}
    [type peer-owner-id]]
   (if connected?
     (let [vpeer-id (java.util.UUID/randomUUID)
           group-id (:id group-state)
           log (:log comm) 
           vpeer (component/start (vpeer-system-fn group-ch outbox-ch peer-config 
-                                                  messaging-group epidemic-messaging-group epidemic-messenger monitoring
+                                                  messaging-group epidemic-messenger monitoring
                                                   log group-id vpeer-id))]
       (-> state 
           (assoc-in [:vpeers vpeer-id] vpeer)
@@ -247,7 +245,7 @@
 
 (defrecord PeerGroupManager [peer-config onyx-vpeer-system-fn]
   component/Lifecycle
-  (start [{:keys [monitoring query-server messaging-group epidemic-messaging-group epidemic-messenger] :as component}]
+  (start [{:keys [monitoring query-server messaging-group epidemic-messenger] :as component}]
     (let [group-ch (chan 1000)
           shutdown-ch (chan 1)
           thread-ch (thread 
@@ -265,7 +263,6 @@
                                                :group-ch group-ch
                                                :messaging-group messaging-group
                                                :monitoring monitoring
-                                               :epidemic-messaging-group epidemic-messaging-group
                                                :epidemic-messenger epidemic-messenger
                                                :query-server query-server
                                                :peer-owners {}

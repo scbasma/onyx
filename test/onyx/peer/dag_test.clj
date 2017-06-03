@@ -230,9 +230,12 @@
                             :lifecycles lifecycles
                             :task-scheduler :onyx.task-scheduler/balanced})
 
-      (let [j-results (take-segments! @j-chan)
+      (let [_ (println "before j-results")
+            j-results (take-segments! @j-chan)
+            _ (println "after j-results")
             k-results (take-segments! @k-chan)
-            l-results (take-segments! @l-chan)]
+            l-results (take-segments! @l-chan)
+            _ (println "after last results!")]
         (is (= :done (last j-results)))
         (is (= :done (last k-results)))
         (is (= :done (last l-results)))

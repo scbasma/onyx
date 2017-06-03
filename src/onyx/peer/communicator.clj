@@ -8,6 +8,11 @@
             [onyx.peer.log-version]
             [onyx.static.default-vals :refer [arg-or-default]]))
 
+(def log-event-counter (atom -1))
+
+(defn inc-log-event-counter []
+  (swap! log-event-counter inc))
+
 (defn outbox-loop [log outbox-ch group-ch]
   (loop []
     (when-let [entry (<!! outbox-ch)]
@@ -15,6 +20,8 @@
        (trace "Log Writer: wrote - " entry)
        (extensions/write-log-entry log entry)
        (put! group-ch [:epidemic-log-event entry])
+       (inc-log-event-counter)
+       (println (str "after sending epidemic-log-event number: " @log-event-counter))
        (catch Throwable e
          (warn e "Replica services couldn't write to ZooKeeper.")
          (>!! group-ch [:restart-peer-group])))
