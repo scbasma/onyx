@@ -40,10 +40,10 @@
                        "-XX:+UseG1GC" 
                        "-Daeron.client.liveness.timeout=100000000000"
                        "-Daeron.image.liveness.timeout=100000000000"
-                       "-XX:-OmitStackTraceInFastThrow" 
-                       "-XX:+UnlockCommercialFeatures"
-                       "-XX:+FlightRecorder"
-                       "-XX:StartFlightRecording=duration=1080s,filename=recording.jfr"]
+                       "-XX:-OmitStackTraceInFastThrow"]
+                       ;"-XX:+UnlockCommercialFeatures"
+                       ;"-XX:+FlightRecorder"
+                       ;"-XX:StartFlightRecording=duration=1080s,filename=recording.jfr"]
   :java-source-paths ["src-java"]
   :profiles {:dev {:global-vars {*warn-on-reflection* true}
                    :dependencies [[org.clojure/tools.nrepl "0.2.11"]
