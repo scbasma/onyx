@@ -8,7 +8,8 @@
             [onyx.log.curator :as curator]
             [onyx.static.uuid :refer [random-uuid]]
             [onyx.peer.communicator :as comm]
-            [onyx.extensions :as extensions]))
+            [onyx.extensions :as extensions]
+            [onyx.messaging.protocols.epidemic-messenger :as em]))
 
 (defn annotate-reaction [{:keys [message-id]} id entry]
   (let [peer-annotated (assoc entry :peer-parent id)]
@@ -194,8 +195,8 @@
     state))
 
 (defmethod action :apply-log-entry [{:keys [replica group-state comm peer-config vpeers query-server] :as state} [type entry]]
-  (try 
-   (let [new-replica (extensions/apply-log-entry entry (assoc replica :version (:message-id entry))) 
+  (try
+    (let [new-replica (extensions/apply-log-entry entry (assoc replica :version (:message-id entry)))
          diff (extensions/replica-diff entry replica new-replica)
          tgroup (transition-group entry replica new-replica diff group-state)
          tpeers (transition-peers (:log comm) entry replica new-replica diff peer-config vpeers)
@@ -211,6 +212,14 @@
      ;; Future work should eliminate uncertainty here e.g. use of log in transition-peers
      (error e (format "Error applying log entry: %s to %s. Rebooting peer-group %s." entry replica (:id group-state)) e)
      (action state [:restart-peer-group (:id group-state)]))))
+
+(defmethod action :epidemic-log-event [state [type log-event]]
+  (let [messenger (:aeron-epidemic-messenger (:epidemic-messenger state))]
+    (try
+      (em/offer-log-event! messenger log-event)
+      (catch Exception e
+        (warn "Epidemic log-event exception caught: " e))))
+  state)
 
 (defn peer-group-manager-loop [state]
   (try 
@@ -236,7 +245,7 @@
 
 (defrecord PeerGroupManager [peer-config onyx-vpeer-system-fn]
   component/Lifecycle
-  (start [{:keys [monitoring query-server messenger-group] :as component}]
+  (start [{:keys [monitoring query-server messenger-group epidemic-messenger] :as component}]
     (let [group-ch (chan 1000)
           shutdown-ch (chan 1)
           initial-state {:peer-config peer-config
@@ -252,6 +261,7 @@
                          :shutdown-ch shutdown-ch
                          :group-ch group-ch
                          :messenger-group messenger-group
+                         :epidemic-messenger epidemic-messenger
                          :monitoring monitoring
                          :query-server query-server
                          :peer-owners {}
