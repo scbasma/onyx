@@ -10,6 +10,7 @@
             [onyx.messaging.atom-messenger]
             [onyx.messaging.aeron.messaging-group]
             [onyx.messaging.aeron.messenger]
+            [onyx.messaging.aeron.epidemic-messenger :refer [build-epidemic-messenger]]
             [onyx.peer.peer-group-manager :as pgm]
             [onyx.monitoring.no-op-monitoring]
             [onyx.monitoring.custom-monitoring]
@@ -52,7 +53,7 @@
 
 (def development-components [:monitoring :logging-config :log])
 
-(def peer-group-components [:logging-config :monitoring :query-server :messenger-group :peer-group-manager])
+(def peer-group-components [:logging-config :monitoring :query-server :messenger-group :epidemic-messenger :peer-group-manager])
 
 (def client-components [:monitoring :log])
 
@@ -156,9 +157,10 @@
     :logging-config (logging-config/logging-configuration peer-config)
     :monitoring (component/using (metrics-monitoring/new-monitoring) [:logging-config])
     :messenger-group (component/using (m/build-messenger-group peer-config) [:logging-config])
+    :epidemic-messenger (component/using (build-epidemic-messenger peer-config) [:monitoring :messenger-group])
     :query-server (component/using (qs/query-server peer-config) [:logging-config])
     :peer-group-manager (component/using (pgm/peer-group-manager peer-config onyx-vpeer-system) 
-                                         [:logging-config :monitoring :messenger-group :query-server])}))
+                                         [:logging-config :monitoring :messenger-group :epidemic-messenger :query-server])}))
 
 (defmethod clojure.core/print-method OnyxPeer
   [system ^java.io.Writer writer]
