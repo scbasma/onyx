@@ -1,76 +1,117 @@
 (ns onyx.messaging.serialize
-  (:require [onyx.compression.nippy :refer [messaging-compress messaging-decompress]])
+  (:require [onyx.compression.nippy :refer [messaging-compress messaging-decompress]]
+            [onyx.types :as t :refer [barrier ready ready-reply heartbeat]]
+            [onyx.messaging.serializers.helpers :refer [uncoerce-peer-id coerce-peer-id]]
+            [onyx.messaging.serializers.heartbeat-encoder :as hbenc]
+            [onyx.messaging.serializers.heartbeat-decoder :as hbdec]
+            [onyx.messaging.serializers.barrier-encoder :as benc]
+            [onyx.messaging.serializers.barrier-decoder :as bdec]
+            [onyx.messaging.serializers.ready-encoder :as renc]
+            [onyx.messaging.serializers.ready-decoder :as rdec]
+            [onyx.messaging.serializers.ready-reply-encoder :as rrenc]
+            [onyx.messaging.serializers.ready-reply-decoder :as rrdec]
+            [onyx.messaging.serializers.base-decoder :as basedec]
+            [onyx.messaging.serializers.base-encoder :as baseenc])
   (:import [org.agrona.concurrent UnsafeBuffer]
-           [onyx.serialization MessageEncoder MessageDecoder MessageEncoder$SegmentsEncoder]))
+           [onyx.messaging.serializers.base_decoder.Decoder]))
 
-(def message-id ^:const (byte 0))
-(def barrier-id ^:const (byte 1))
-(def heartbeat-id ^:const (byte 2))
-(def ready-id ^:const (byte 3))
-(def ready-reply-id ^:const (byte 4))
 
-; (defn message [replica-version short-id payload]
-;   {:type message-id :replica-version replica-version :short-id short-id :payload payload})
+(defn deserialize 
+  "Message payload deserializer for when you don't want to interact with decoders directly.
+   Note: slower."
+  [^UnsafeBuffer buf offset]
+  (let [decoder (basedec/wrap (basedec/->Decoder nil offset) buf offset)
+        t (basedec/get-type decoder)
+        rv (basedec/get-replica-version decoder)
+        dest-id (basedec/get-dest-id decoder)
+        base {:type t
+              :replica-version rv
+              :short-id dest-id}]
+    (cond (= t t/heartbeat-id)
+          (let [hb-dec (hbdec/wrap buf (+ offset (basedec/length decoder)))]
+            (merge base 
+                   (messaging-decompress (hbdec/get-opts-map-bytes hb-dec))
+                   {:epoch (hbdec/get-epoch hb-dec)
+                    :session-id (hbdec/get-session-id hb-dec)
+                    :src-peer-id (uncoerce-peer-id (hbdec/get-src-peer-id hb-dec))
+                    :dst-peer-id (uncoerce-peer-id (hbdec/get-dst-peer-id hb-dec))}))
 
-(defn barrier [replica-version epoch short-id]
-  {:type barrier-id :replica-version replica-version :epoch epoch :short-id short-id})
+          (= t t/ready-reply-id)
+          (let [rrdec (rrdec/wrap buf (+ offset (basedec/length decoder)))] 
+            (merge base 
+                   {:src-peer-id (uncoerce-peer-id (rrdec/get-src-peer-id rrdec))
+                    :dst-peer-id (uncoerce-peer-id (rrdec/get-dst-peer-id rrdec))
+                    :session-id (rrdec/get-session-id rrdec)}))
 
-;; should be able to get rid of src-peer-id via short-id
-(defn ready [replica-version src-peer-id short-id]
-  {:type ready-id :replica-version replica-version :src-peer-id src-peer-id :short-id short-id})
+          (= t t/ready-id)
+          (let [rdec (rdec/wrap buf (+ offset (basedec/length decoder)))] 
+            (merge base 
+                   {:src-peer-id (uncoerce-peer-id (rdec/get-src-peer-id rdec))}))
 
-(defn ready-reply [replica-version src-peer-id dst-peer-id session-id short-id]
-  {:type ready-reply-id :replica-version replica-version :src-peer-id src-peer-id 
-   :dst-peer-id dst-peer-id :session-id session-id :short-id short-id})
+          (= t t/barrier-id)
+          (let [bdec (bdec/wrap buf (+ offset (basedec/length decoder)))]
+            (merge base 
+                   {:epoch (bdec/get-epoch bdec)}
+                   (messaging-decompress (bdec/get-opts-map-bytes bdec)))))))
 
-(defn heartbeat [replica-version epoch src-peer-id dst-peer-id session-id short-id]
-  {:type heartbeat-id :replica-version replica-version :epoch epoch 
-   :src-peer-id src-peer-id :dst-peer-id dst-peer-id :session-id session-id
-   :short-id short-id})
+(defn serialize 
+  "Message payload serializer for when you don't want to interact with decoders directly.
+   Note: slower than just building it without a map."
+  [^UnsafeBuffer buf offset msg]
+  (let [t (:type msg)
+        enc (-> (baseenc/->Encoder nil offset)
+                (baseenc/wrap buf offset)
+                (baseenc/set-type t)
+                (baseenc/set-replica-version (:replica-version msg))
+                (baseenc/set-dest-id (:short-id msg)))]
+    (cond (= t onyx.types/heartbeat-id)
+          (let [hb-enc (-> (hbenc/wrap buf (baseenc/length enc))
+                           (hbenc/set-epoch (:epoch msg))
+                           (hbenc/set-session-id (:session-id msg))
+                           (hbenc/set-src-peer-id (coerce-peer-id (:src-peer-id msg)))
+                           (hbenc/set-dst-peer-id (coerce-peer-id (:dst-peer-id msg)))
+                           (hbenc/set-opts-map-bytes (-> msg
+                                                         (dissoc :type)
+                                                         (dissoc :replica-version)
+                                                         (dissoc :short-id)
+                                                         (dissoc :session-id)
+                                                         (dissoc :epoch)
+                                                         (dissoc :src-peer-id)
+                                                         (dissoc :dst-peer-id)
+                                                         (messaging-compress))))]
+            (baseenc/set-payload-length enc (hbenc/length hb-enc))
+            (+ (hbenc/length hb-enc) (baseenc/length enc)))
 
-(defn get-message-type [^UnsafeBuffer buf offset]
-  (.getByte buf ^long offset))
+          (= t onyx.types/barrier-id)
+          (let [benc (-> (benc/wrap buf (baseenc/length enc))
+                         (benc/set-epoch (:epoch msg))
+                         (benc/set-opts-map-bytes (-> msg
+                                                      (dissoc :type)
+                                                      (dissoc :replica-version)
+                                                      (dissoc :short-id)
+                                                      (dissoc :epoch)
+                                                      (messaging-compress))))]
+            (baseenc/set-payload-length enc (benc/length benc))
+            (+ (benc/length benc) (baseenc/length enc)))
 
-(defn put-message-type [^UnsafeBuffer buf offset type-id] 
-  (.putByte buf offset type-id))
+          (= t onyx.types/ready-id)
+          (let [renc (-> (renc/wrap buf (baseenc/length enc))
+                         (renc/set-src-peer-id (coerce-peer-id (:src-peer-id msg))))]
+            (baseenc/set-payload-length enc (renc/length renc))
+            (+ (renc/length renc) (baseenc/length enc)))
 
-(defn serialize ^UnsafeBuffer [msg]
-  (let [bs ^bytes (messaging-compress msg)
-        length (inc (alength bs))
-        buf (UnsafeBuffer. (byte-array length))]
-    (put-message-type buf 0 (:type msg))
-    (.putBytes buf 1 bs)
-    buf))  
+          (= t onyx.types/ready-reply-id)
+          (let [rrenc (-> (rrenc/wrap buf (baseenc/length enc))
+                          (rrenc/set-src-peer-id (coerce-peer-id (:src-peer-id msg)))
+                          (rrenc/set-dst-peer-id (coerce-peer-id (:dst-peer-id msg)))
+                          (rrenc/set-session-id (:session-id msg)))]
+            (baseenc/set-payload-length enc (rrenc/length rrenc))
+            (+ (rrenc/length rrenc) (baseenc/length enc)))
+          (= t 101)
+          (let [bs ^bytes (messaging-compress msg)
+                   length (inc (alength bs))
+                   buf (UnsafeBuffer. (byte-array length))]
+               (.putBytes buf 0 bs)
+               buf))))
 
-(defn deserialize [^UnsafeBuffer buf offset length]
-  (let [bs (byte-array length)] 
-    (.getBytes buf offset bs)
-    (messaging-decompress bs)))
-
-(defn add-segment-payload! [^MessageEncoder encoder segments]
-  (let [seg-encoder (loop [^MessageEncoder$SegmentsEncoder enc (.segmentsCount encoder (count segments))
-                           v (first segments) 
-                           vs (rest segments)]
-                      (let [bs ^bytes (messaging-compress v) 
-                            cnt ^int (alength bs)]
-                        (when v 
-                          (recur (.putSegmentBytes (.next enc) bs 0 cnt)
-                                 (first vs) 
-                                 (rest vs)))))]
-    (.encodedLength encoder)))
-
-(defn wrap-message-encoder ^MessageEncoder [^UnsafeBuffer buf offset]
-  (-> (MessageEncoder.)
-      (.wrap buf offset)))
-
-(defn wrap-message-decoder ^MessageDecoder [^UnsafeBuffer buf offset]
-  (-> (MessageDecoder.)
-      (.wrap buf offset MessageDecoder/BLOCK_LENGTH 0)))
-
-(defn into-segments! [^MessageDecoder decoder ^bytes bs segments]
-  (loop [dc (.segments decoder) cnt 0]
-    (when (.hasNext dc)
-      (.getSegmentBytes dc bs 0 (.segmentBytesLength dc))
-      (conj! segments (messaging-decompress bs))
-      (recur (.next dc) (inc cnt))))
-  segments)
+(comment )

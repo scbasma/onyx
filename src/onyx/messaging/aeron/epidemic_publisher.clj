@@ -2,11 +2,23 @@
   (:require [onyx.messaging.protocols.epidemic-publisher :as epub]
             [onyx.messaging.aeron.utils :as autil]
             [taoensso.timbre :refer [debug info warn] :as timbre]
-            [onyx.messaging.serialize :as sz])
+            [onyx.messaging.serialize :as sz]
+            [onyx.compression.nippy :refer [messaging-compress]])
   (:import [io.aeron Aeron Aeron$Context Publication UnavailableImageHandler AvailableImageHandler]
            [java.util.concurrent.atomic AtomicLong]
            [org.agrona.concurrent UnsafeBuffer]
            [org.agrona ErrorHandler]))
+
+(defn put-message-type [^UnsafeBuffer buf offset type-id]
+  (.putByte buf offset type-id))
+
+(defn dummy-serialize ^UnsafeBuffer [msg]
+  (let [bs ^bytes (messaging-compress msg)
+        length (inc (alength bs))
+        buf (UnsafeBuffer. (byte-array length))]
+    (put-message-type buf 0 (:type msg))
+    (.putBytes buf 1 bs)
+    buf))
 
 (deftype EpidemicPublisher [peer-config src-peer-id site ^AtomicLong written-bytes
                             ^AtomicLong errors ^Aeron conn ^Publication publication error
@@ -42,7 +54,9 @@
     pub)
   (offer-log-event! [this log-event]
     (let [msg {:type 101 :data log-event}
-          buf (sz/serialize msg)
+          _ (println "offering log event")
+          buf (dummy-serialize msg)
+          _ (println "after buf creation")
           ret (.offer ^Publication publication buf 0 (.capacity buf))]
       (println (str "Offered log event from epidemic publisher, ret: " ret)))))
 

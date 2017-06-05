@@ -1,20 +1,26 @@
 (ns onyx.messaging.aeron.epidemic-subscriber
   (:require [onyx.messaging.protocols.epidemic-subscriber :as esub]
-            [onyx.messaging.aeron.subscriber :refer [available-image unavailable-image]]
+            [onyx.messaging.aeron.subscriber :refer [available-image unavailable-image new-error-handler]]
             [onyx.messaging.aeron.utils :as autil]
             [taoensso.timbre :refer [info debug warn] :as timbre]
+            [onyx.compression.nippy :refer [messaging-decompress]]
             [onyx.messaging.serialize :as sz]
             [onyx.static.default-vals :refer [arg-or-default]])
   (:import [java.util.concurrent.atomic AtomicLong]
            [org.agrona.concurrent UnsafeBuffer IdleStrategy BackoffIdleStrategy]
            [org.agrona ErrorHandler]
-           [onyx.serialization MessageEncoder MessageDecoder MessageEncoder$SegmentsEncoder]
            [onyx.messaging.aeron.int2objectmap CljInt2ObjectHashMap]
            [io.aeron Aeron Aeron$Context Publication Subscription Image
                      ControlledFragmentAssembler UnavailableImageHandler
                      AvailableImageHandler]
            [io.aeron.logbuffer ControlledFragmentHandler ControlledFragmentHandler$Action FragmentHandler]
            (java.util.function Consumer)))
+
+
+(defn dummy-deserialize [^UnsafeBuffer buf offset length]
+  (let [bs (byte-array length)]
+    (.getBytes buf offset bs)
+    (messaging-decompress bs)))
 
 (def fragment-limit-receiver 100000)
 
@@ -43,7 +49,7 @@
     (info "Shutting down subscriber.")))
 
 (deftype EpidemicSubscriber [peer-id peer-config site batch-size ^AtomicLong read-bytes
-                             ^AtomicLong errors error ^bytes bs channel ^Aeron conn
+                             ^AtomicLong error-counter error ^bytes bs channel ^Aeron conn
                              ^Subscription subscription lost-sessions
                              ^:unsynchronized-mutable ^ControlledFragmentAssembler assembler
                              ^:unsynchronized-mutable stream-id
@@ -52,28 +58,25 @@
 
   esub/EpidemicSubscriber
   (start [this]
-    (let [error-handler (reify ErrorHandler
-                         (onError [this x]
-                           (reset! error x)
-                           (.addAndGet errors 1)))
+    (let [
           media-driver-dir (:onyx.messaging.aeron/media-driver-dir peer-config)
           lost-sessions (atom #{})
           sinfo [peer-id site]
-          ctx (cond-> (Aeron$Context.)
-                      error-handler (.errorHandler error-handler)
-                      media-driver-dir (.aeronDirectoryName ^String media-driver-dir)
-                      true (.availableImageHandler (available-image sinfo))
-                      true (.unavailableImageHandler (unavailable-image sinfo lost-sessions)))
+          ctx (cond-> (.errorHandler (Aeron$Context.)
+                                     (new-error-handler error error-counter))
+                      media-driver-dir (.aeronDirectoryName ^String media-driver-dir))
+          available-image-handler (available-image sinfo lost-sessions)
+          unavailable-image-handler (unavailable-image sinfo)
           conn (Aeron/connect ctx)
           channel (autil/channel peer-config)
           stream-id 1001
-          sub (.addSubscription conn channel stream-id)
+          sub (.addSubscription conn channel stream-id available-image-handler unavailable-image-handler)
           sources []
           status-pubs {}
           status {}
           new-subscriber (esub/add-assembler
                            (EpidemicSubscriber. peer-id peer-config site batch-size read-bytes
-                                                errors error bs channel conn sub lost-sessions
+                                                error-counter error bs channel conn sub lost-sessions
                                                 nil stream-id nil nil))
           shutdown (atom false)
           listening-thread (start-subscriber! new-subscriber shutdown peer-config)]
@@ -96,11 +99,11 @@
     batch)
   ControlledFragmentHandler
   (onFragment [this buffer offset length header]
-    (let [message (sz/deserialize buffer (inc offset) (dec length))]
+    (let [message (dummy-deserialize buffer (inc offset) (dec length))]
       (println "received log-event message: " message))))
 
 (defn new-epidemic-subscriber [peer-config monitoring peer-id
                                {:keys [site batch-size] :as sub-info}]
-  (->EpidemicSubscriber peer-id peer-config site batch-size (:read-bytes monitoring)
-                        (:subscription-errors monitoring) (atom nil) (byte-array (autil/max-message-length))
+  (->EpidemicSubscriber peer-id peer-config site batch-size (AtomicLong. )
+                        (AtomicLong. ) (atom nil) (byte-array (autil/max-message-length))
                         nil nil nil nil nil nil nil nil))

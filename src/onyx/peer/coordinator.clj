@@ -34,8 +34,10 @@
                                     (get peer-sites input-peer)))
                         (map (fn [[site colocated-peers]]
                                {:src-peer-id coordinator-peer-id
+                                :job-id job-id
                                 :dst-task-id [job-id task]
                                 :dst-peer-ids (set colocated-peers)
+                                :batch-size 0
                                 :short-id (get message-short-ids
                                                {:src-peer-type :coordinator
                                                 :src-peer-id peer-id
@@ -51,6 +53,8 @@
   (run! pub/offer-heartbeat! (m/publishers messenger))
   (assoc state :last-heartbeat-time (System/nanoTime)))
 
+(def coordinator-backoff-ms 1)
+
 (defn offer-barriers [{:keys [messenger barrier] :as state}]
   (if (:offering? barrier)
     (let [offer-xf (comp (map (fn [pub]
@@ -63,7 +67,7 @@
         (update state :barrier merge {:remaining nil
                                       :offering? false})
         (do ;; park and retry
-            (LockSupport/parkNanos (ms->ns 2))
+            (LockSupport/parkNanos (ms->ns coordinator-backoff-ms))
             (update state :barrier merge {:remaining new-remaining}))))
     state))
 
@@ -280,8 +284,7 @@
     (>!! shutdown-ch scheduler-event)
     (close! shutdown-ch))
   (when allocation-ch
-    (close! allocation-ch))
-  (info "Coordinator stopped."))
+    (close! allocation-ch)))
 
 (defrecord PeerCoordinator
            [workflow resume-point log messenger-group peer-config peer-id job-id monitoring
@@ -290,7 +293,7 @@
   (start [this]
     (info "Piggybacking coordinator on peer:" peer-id)
     (let [initial-replica (onyx.log.replica/starting-replica peer-config)
-          messenger (-> (m/build-messenger peer-config messenger-group monitoring [:coordinator peer-id])
+          messenger (-> (m/build-messenger peer-config messenger-group monitoring [:coordinator peer-id] {})
                         (start-messenger initial-replica job-id))
           allocation-ch (chan (sliding-buffer 1))
           shutdown-ch (promise-chan)

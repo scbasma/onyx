@@ -4,13 +4,15 @@
             [metrics.histograms :as h]
             [metrics.timers :as t]
             [metrics.gauges :as g]
+            [onyx.static.default-vals :refer [arg-or-default]]
             [onyx.extensions :as extensions]
             [metrics.counters :as c]
             [onyx.protocol.task-state :as task]
+            [onyx.static.util :refer [ns->ms]]
             [taoensso.timbre :refer [warn info]]
             [com.stuartsierra.component :as component])
   (:import [com.codahale.metrics JmxReporter]
-           [java.util.concurrent.atomic AtomicLong]
+           [java.util.concurrent.atomic AtomicLong AtomicInteger]
            [com.codahale.metrics Gauge]
            [java.util.concurrent TimeUnit]))
 
@@ -28,7 +30,6 @@
 (defn update-timer-ns! [^com.codahale.metrics.Timer timer ns]
   (.update timer ns TimeUnit/NANOSECONDS))
 
-;; TODO, define all of the keys we need
 (defrecord Monitoring []
   extensions/IEmitEvent
   (extensions/registered? [this event-type]
@@ -77,13 +78,24 @@
           group-prepare-join-cnt (c/counter reg ["group" "prepare-join" "event"])
           group-accept-join-cnt (c/counter reg ["group" "accept-join" "event"])
           group-notify-join-cnt (c/counter reg ["group" "notify-join" "event"])
-          reporter (.build (JmxReporter/forRegistry reg))
+          peer-error-rate (m/meter reg ["peer-group" "peer" "errors"])
+          last-heartbeat (AtomicLong.)
+          peer-group-heartbeat (g/gauge-fn reg
+                                           ["peer-group" "since-heartbeat"] 
+                                           (fn [] 
+                                             (ns->ms (- (System/nanoTime)
+                                                        (.get ^AtomicLong last-heartbeat)))))
+          reporter (-> (JmxReporter/forRegistry reg)
+                       (.inDomain "org.onyxplatform")
+                       (.build))
           _ (.start ^JmxReporter reporter)] 
       (info "Started Metrics Reporting to JMX.")
       (assoc component
              :monitoring :custom
              :registry reg
              :reporter reporter
+             :peer-group-heartbeat! (fn [] (.set ^AtomicLong last-heartbeat ^long (System/nanoTime)))
+             :peer-error! (fn [] (m/mark! peer-error-rate))
              :zookeeper-write-log-entry (fn [config metric] 
                                           (h/update! write-log-entry-bytes (:bytes metric))
                                           (update-timer! write-log-entry-latency (:latency metric)))
@@ -164,29 +176,38 @@
   (let [throughput (m/meter reg (into tag ["task-lifecycle" (name lifecycle) "throughput"]))
         timer ^com.codahale.metrics.Timer (t/timer reg (into tag ["task-lifecycle" (name lifecycle)]))] 
     (fn [state latency-ns]
-      (m/mark! throughput (count (:onyx.core/batch (task/get-event state))))
-      (.update timer latency-ns TimeUnit/NANOSECONDS))))
+      (let [size (count (:onyx.core/batch (task/get-event state)))] 
+        (when-not (zero? size)
+          (m/mark! throughput size)
+          (.update timer latency-ns TimeUnit/NANOSECONDS))))))
 
 (defn count-written-batch [state]
   (reduce (fn [c {:keys [leaves]}]
-            (+ c (count leaves)))
-          0
+            (unchecked-add c (count leaves)))
+          (long 0)
           (:tree (:onyx.core/results (task/get-event state)))))
 
 (defn new-write-batch [reg tag lifecycle]
   (let [throughput (m/meter reg (into tag ["task-lifecycle" (name lifecycle) "throughput"]))
-        timer ^com.codahale.metrics.Timer (t/timer reg (into tag ["task-lifecycle" (name lifecycle)]))] 
+        timer ^com.codahale.metrics.Timer (t/timer reg (into tag ["task-lifecycle" (name lifecycle)]))
+        accum (volatile! (long 0))]
     (fn [state latency-ns]
-      ;; TODO, for blockable lifecycles we should probably accumulate time until we advance.
-      (.update timer latency-ns TimeUnit/NANOSECONDS)
+      (vswap! accum (fn [a] (unchecked-add a latency-ns)))
       (when (task/advanced? state)
-        (m/mark! throughput (count-written-batch state))))))
+        (let [cnt (count-written-batch state)]
+          (when-not (zero? cnt)
+            (.update timer @accum TimeUnit/NANOSECONDS)
+            (vreset! accum (long 0))
+            (m/mark! throughput cnt)))))))
 
 (defn update-rv-epoch [^AtomicLong replica-version ^AtomicLong epoch epoch-rate]
   (fn [state latency-ns]
     (m/mark! epoch-rate 1)
     (.set ^AtomicLong replica-version (task/replica-version state))
     (.set ^AtomicLong epoch (task/epoch state))))
+
+(defn cleanup-keyword [k]
+  (apply str (rest (str k))))
 
 (defrecord TaskMonitoring [event]
   extensions/IEmitEvent
@@ -197,15 +218,22 @@
       (f this event)))
   component/Lifecycle
   (component/start [component]
-    (let [{:keys [onyx.core/job-id onyx.core/id onyx.core/monitoring onyx.core/task]} event
-          lifecycles #{:lifecycle/read-batch :lifecycle/write-batch 
-                       :lifecycle/apply-fn :lifecycle/unblock-subscribers}
-          job-name (str (get-in event [:onyx.core/task-information :metadata :name] job-id))
-          task-name (name (:onyx.core/task event))
+    (let [{:keys [onyx.core/job-id onyx.core/id onyx.core/slot-id onyx.core/monitoring 
+                  onyx.core/task onyx.core/metadata onyx.core/peer-opts]} event
+          lifecycles (arg-or-default :onyx.peer.metrics/lifecycles peer-opts)
+          job-name (cond-> (get metadata :job-name job-id)
+                     keyword? cleanup-keyword)
+          task-name (cleanup-keyword task)
           task-registry (new-registry)
-          tag ["job" job-name "task" task-name "peer-id" (str id)]
+          tag ["job-name" job-name "job-id" (str job-id) "task" task-name "slot-id" (str slot-id) "peer-id" (str id)]
           replica-version (AtomicLong.)
           epoch (AtomicLong.)
+          task-state-index (AtomicInteger.)
+          task-state-index-gg (g/gauge-fn task-registry (conj tag "lifecycle-index") (fn [] (.get ^AtomicInteger task-state-index)))
+
+          written-bytes (AtomicLong.)
+          written-bytes-gg (g/gauge-fn task-registry (conj tag "written-bytes") (fn [] (.get ^AtomicLong written-bytes)))
+
           gg-replica-version (g/gauge-fn task-registry (conj tag "replica-version") (fn [] (.get ^AtomicLong replica-version)))
           gg-epoch (g/gauge-fn task-registry (conj tag "epoch") (fn [] (.get ^AtomicLong epoch)))
           epoch-rate (m/meter task-registry (conj tag "epoch-rate"))
@@ -224,17 +252,31 @@
           read-bytes (AtomicLong.)
           read-bytes-gg (g/gauge-fn task-registry (conj tag "read-bytes") (fn [] (.get ^AtomicLong read-bytes)))
 
-
           subscription-errors (AtomicLong.)
           subscription-errors-gg (g/gauge-fn task-registry (conj tag "subscription-errors") (fn [] (.get ^AtomicLong subscription-errors)))
-
-          last-heartbeat ^com.codahale.metrics.Timer (t/timer task-registry (into tag ["since-heartbeat"]))
+          since-received-heartbeat ^com.codahale.metrics.Timer (t/timer task-registry (into tag ["since-received-heartbeat"]))
+          last-heartbeat (AtomicLong. (System/nanoTime))
+          peer-heartbeat (g/gauge-fn task-registry
+                                     (conj tag "since-heartbeat")
+                                     (fn []
+                                       (ns->ms (- (System/nanoTime)
+                                                  (.get ^AtomicLong last-heartbeat)))))
+          time-init-state (AtomicLong. (System/nanoTime))
+          time-in-state-gg (g/gauge-fn task-registry
+                                       (conj tag "current-lifecycle-duration")
+                                       (fn []
+                                         (ns->ms (- (System/nanoTime) 
+                                                    (.get ^AtomicLong time-init-state)))))
           checkpoint-serialization-latency ^com.codahale.metrics.Timer (t/timer task-registry (into tag ["checkpoint-serialization-latency"]))
           checkpoint-store-latency ^com.codahale.metrics.Timer (t/timer task-registry (into tag ["checkpoint-store-latency"]))
           checkpoint-size (AtomicLong.)
           checkpoint-size-gg (g/gauge-fn task-registry (conj tag "checkpoint-size") (fn [] (.get ^AtomicLong checkpoint-size)))
+          read-offset (AtomicLong.)
+          read-offset-gg (g/gauge-fn task-registry (conj tag "offset") (fn [] (.get ^AtomicLong read-offset)))
           recover-latency ^com.codahale.metrics.Timer (t/timer task-registry (into tag ["recover-latency"]))
-          reporter (.build (JmxReporter/forRegistry task-registry))
+          reporter (-> (JmxReporter/forRegistry task-registry)
+                       (.inDomain "org.onyxplatform")
+                       (.build))
           _ (.start ^JmxReporter reporter)] 
       (info "Starting Task Metrics Reporter. Starting reporting to JMX.")
       (reduce 
@@ -251,14 +293,18 @@
               :publication-errors publication-errors
               :read-bytes read-bytes
               :subscription-errors subscription-errors
+              :task-state-index task-state-index
               :checkpoint-written-bytes checkpoint-written-bytes
               :checkpoint-read-bytes checkpoint-read-bytes
               :checkpoint-serialization-latency checkpoint-serialization-latency
               :checkpoint-store-latency checkpoint-store-latency
               :checkpoint-size checkpoint-size
               :checkpoint-written-bytes checkpoint-size
+              :read-offset read-offset
               :recover-latency recover-latency
-              :last-heartbeat-timer last-heartbeat
+              :last-heartbeat last-heartbeat
+              :time-init-state time-init-state
+              :since-received-heartbeat since-received-heartbeat
               :monitoring :custom
               :registry task-registry
               :reporter reporter)

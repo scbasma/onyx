@@ -1,5 +1,57 @@
 ## 0.10.0
 
+#### 0.10.0-beta17
+- Fix bug in short circuiting.
+
+#### 0.10.0-beta16
+- Re-release.
+
+#### 0.10.0-beta15
+
+- **BREAKING CHANGE** Fixed issue where namespaced tasks with same name would collide. This will break the ability to use old resume points for namespaced tasks.
+- Big performance improvements, re-enable local to local short circuiting.
+- Fix bug in `:trigger/emit`.
+- Upgrade aeron back to 1.2.5.
+- Report `:job-name` from job `:metadata` in metrics tags.
+- Support routing of exceptions from flow conditions predicates.
+
+#### 0.10.0-beta14
+- Back out Aeron dependency upgraded in beta13 as it broke media driver health checks. This will be upgraded after resolving the health check issue.
+
+#### 0.10.0-beta13
+- Fix error with punctuation triggers which prevented checkpointing to S3.
+
+#### 0.10.0-beta12
+- `:window/id` and `:trigger/id` can now be uuids as well as keywords.
+- Add peer group heartbeat metric, reported to "peer-group.since-heartbeat" in JMX.
+
+#### 0.10.0-beta11
+- Fix an issue where a replica invariant assertion would be tripped though the replica state was correct.
+- Report JMX metrics to org.onyxplatform namespace.
+
+#### 0.10.0-beta9
+- Support dynamic write batch sizes which will not overflow Aeron buffers. Under a default term buffer configuration, Aeron allows messages of up to 2MB. Onyx's batching mechanism means that a batch can be at maximum 2MB, which means that an individual segment had to be well under 2MB. Onyx will now split segments into multiple batches once the buffer has been filled.
+
+#### 0.10.0-beta8
+- Revert change in heartbeating logic that was causing heartbeat channels to become stuck.
+
+#### 0.10.0-beta8
+
+- Improve flow conditions validation errors.
+- Adjust metrics to include slot-id in metrics tags.
+- Add metric "offset" so that input plugins can report their medium's offset (e.g. kafka topic offset for a given slot-id / partition).
+- Increase default subscriber / publisher timeout to 20000ms.
+- Decrease heartbeat period from 5000ms to 1000ms.
+- Fix bug in status updates that reduces latency of barrier status reporting.
+- Fix bug in session windows which would cause it to lag one message behind.
+- Add gen-class to aeron media driver to allow for main entry point when AOTd
+
+#### 0.10.0-beta7
+
+- Fix timer trigger fires
+- Fix documentation for trigger/emit.
+- Fixes boundary expansion for Session windows.
+
 #### Plugins
 
 Easier to use plugin interfaces handle more of the work around checkpointing.

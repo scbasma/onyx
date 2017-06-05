@@ -1,5 +1,5 @@
 (ns onyx.peer.peer-group-manager
-  (:require [clojure.core.async :refer [>!! <!! alts!! promise-chan close! chan thread poll!]]
+  (:require [clojure.core.async :refer [>!! <!! alts!! promise-chan close! chan thread poll! timeout]]
             [com.stuartsierra.component :as component]
             [taoensso.timbre :refer [debug info error warn fatal]]
             [onyx.log.entry :refer [create-log-entry]]
@@ -194,14 +194,16 @@
         (update :peer-owners dissoc peer-owner-id))
     state))
 
-(defmethod action :apply-log-entry [{:keys [replica group-state comm peer-config vpeers query-server] :as state} [type entry]]
-  (try
-    (let [new-replica (extensions/apply-log-entry entry (assoc replica :version (:message-id entry)))
+(defmethod action :apply-log-entry [{:keys [replica group-state comm peer-config
+                                            vpeers query-server messenger-group] :as state} [type entry]]
+  (try 
+   (let [new-replica (extensions/apply-log-entry entry (assoc replica :version (:message-id entry)))
          diff (extensions/replica-diff entry replica new-replica)
          tgroup (transition-group entry replica new-replica diff group-state)
          tpeers (transition-peers (:log comm) entry replica new-replica diff peer-config vpeers)
          reactions (into (:reactions tgroup) (:reactions tpeers))]
      (update query-server :replica reset! new-replica)
+     (update messenger-group :replica reset! new-replica)
      (-> (reduce (fn [s r] (action s [:send-to-outbox r])) state reactions)
          (assoc :group-state (:group-state tgroup))
          (assoc :vpeers (:vpeers tpeers))
@@ -221,23 +223,32 @@
         (warn "Epidemic log-event exception caught: " e))))
   state)
 
+(def heartbeat-period-ms 500)
+
+(defn heartbeat! [state]
+  ((:heartbeat-fn! state))
+  state)
+
 (defn peer-group-manager-loop [state]
   (try 
    (loop [state (action state [:start-peer-group])]
      (let [{:keys [inbox-ch group-ch shutdown-ch]} state
+           timeout-ch (timeout heartbeat-period-ms)
            chs (if inbox-ch
-                 [shutdown-ch group-ch inbox-ch]
-                 [shutdown-ch group-ch])
+                 [shutdown-ch group-ch inbox-ch timeout-ch]
+                 [shutdown-ch group-ch timeout-ch])
            [entry ch] (alts!! chs :priority true)
            new-state (cond (= ch shutdown-ch)
                            (action state [:stop-peer-group])
+                           (= ch timeout-ch)
+                           (heartbeat! state)
                            (= ch group-ch)
-                           (action state entry)
+                           (-> state heartbeat! (action entry))
                            ;; log reader threw an exception
                            (and (= ch inbox-ch) (instance? java.lang.Throwable entry))
                            (action state [:restart-peer-group])
                            (= ch inbox-ch)
-                           (action state [:apply-log-entry entry]))] 
+                           (-> state heartbeat! (action [:apply-log-entry entry])))] 
        (when (and new-state (not= ch shutdown-ch))
          (recur new-state))))
    (catch Throwable t
@@ -258,6 +269,7 @@
                          :comm nil
                          :inbox-ch nil
                          :outbox-ch nil
+                         :heartbeat-fn! (:peer-group-heartbeat! monitoring) 
                          :shutdown-ch shutdown-ch
                          :group-ch group-ch
                          :messenger-group messenger-group

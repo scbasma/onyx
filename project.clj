@@ -1,4 +1,4 @@
-(defproject org.onyxplatform/onyx "0.10.0-beta5"
+(defproject org.onyxplatform/onyx "0.10.0-beta17"
   :description "Distributed, masterless, high performance, fault tolerant data processing for Clojure"
   :url "https://github.com/onyx-platform/onyx"
   :license {:name "Eclipse Public License"
@@ -12,10 +12,10 @@
                              :password :env
                              :sign-releases false}}
   :dependencies [[org.clojure/clojure "1.8.0"]
-                 [org.clojure/core.async "0.2.395"]
+                 [org.clojure/core.async "0.3.442"]
                  [org.apache.curator/curator-framework "2.9.1"]
                  [org.apache.curator/curator-test "2.9.1"]
-                 [org.apache.zookeeper/zookeeper "3.4.6" :exclusions [org.slf4j/slf4j-log4j12]]
+                 [org.apache.zookeeper/zookeeper "3.4.10" :exclusions [org.slf4j/slf4j-log4j12]]
                  [net.cgrand/xforms "0.9.0"]
                  [org.slf4j/slf4j-api "1.7.12"]
                  [org.slf4j/slf4j-nop "1.7.12"]
@@ -26,28 +26,25 @@
                  [metrics-clojure "2.9.0"]
                  [com.taoensso/timbre "4.8.0"]
                  [com.taoensso/nippy "2.13.0"]
-                 [io.aeron/aeron-all "1.1.0"]
+                 [io.aeron/aeron-all "1.3.0"]
                  [io.replikativ/hasch "0.3.3" 
                   :exclusions [org.clojure/clojurescript com.cognitect/transit-clj 
                                com.cognitect/transit-cljs org.clojure/data.fressian 
                                com.cemerick/austin]]
                  [prismatic/schema "1.0.5"]
-                 [com.amazonaws/aws-java-sdk-s3 "1.11.58"]
+                 [com.amazonaws/aws-java-sdk-s3 "1.11.128"]
                  [clj-tuple "0.2.2"]
                  [clj-fuzzy "0.3.1" :exclusions [org.clojure/clojurescript]]]
   :jvm-opts ^:replace ["-server"
                        "-Xmx2400M"
-                       "-XX:+UseG1GC" 
-                       "-Daeron.client.liveness.timeout=100000000000"
-                       "-Daeron.image.liveness.timeout=100000000000"
+                       "-XX:+UseG1GC"
                        "-XX:-OmitStackTraceInFastThrow"]
                        ;"-XX:+UnlockCommercialFeatures"
                        ;"-XX:+FlightRecorder"
                        ;"-XX:StartFlightRecording=duration=1080s,filename=recording.jfr"]
-  :java-source-paths ["src-java"]
   :profiles {:dev {:global-vars {*warn-on-reflection* true}
                    :dependencies [[org.clojure/tools.nrepl "0.2.11"]
-                                  [org.clojure/java.jmx "0.3.3"]
+                                  [org.clojure/java.jmx "0.3.4"]
                                   [clojure-future-spec "1.9.0-alpha14"]
                                   [table "0.5.0"]
                                   [org.clojure/test.check "0.9.0"]
@@ -160,7 +157,7 @@
      :merge "master"}
     {:git "git@learn-onyx:onyx-platform/learn-onyx.git"
      :branch "compatibility"
-     :release-branch "master"
+     :release-branch "answers"
      :release-script "scripts/release.sh"
      :merge "master"}
     {:git "git@onyx-examples:onyx-platform/onyx-examples.git"
