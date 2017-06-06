@@ -5,7 +5,8 @@
             [taoensso.timbre :refer [info debug warn] :as timbre]
             [onyx.compression.nippy :refer [messaging-decompress]]
             [onyx.messaging.serialize :as sz]
-            [onyx.static.default-vals :refer [arg-or-default]])
+            [onyx.static.default-vals :refer [arg-or-default]]
+            [onyx.messaging.aeron.utils :refer [try-close-conn try-close-subscription]])
   (:import [java.util.concurrent.atomic AtomicLong]
            [org.agrona.concurrent UnsafeBuffer IdleStrategy BackoffIdleStrategy]
            [org.agrona ErrorHandler]
@@ -82,7 +83,13 @@
           listening-thread (start-subscriber! new-subscriber shutdown peer-config)]
     ;(info "Created subscriber" (esub/info new-subscriber))
      new-subscriber))
-  (stop [this])
+  (stop [this]
+    (some-> subscription try-close-subscription)
+    (some-> conn try-close-conn)
+    (EpidemicSubscriber. peer-id peer-config site batch-size (AtomicLong. )
+                        (AtomicLong. ) (atom nil) (byte-array (autil/max-message-length))
+                        nil nil nil nil nil nil nil nil))
+
   (add-assembler [this]
     (set! assembler (ControlledFragmentAssembler. this))
     this)

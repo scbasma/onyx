@@ -8,14 +8,14 @@
             [taoensso.timbre :refer [debug info warn]]))
 
 (deftype AeronEpidemicMessenger [peer-config messenger-group monitoring
-                                 ^:unsynchronized-mutable publisher
-                                 ^:unsynchronized-mutable subscriber]
+                                 ^:unsynchronized-mutable subscriber
+                                 ^:unsynchronized-mutable publisher]
   em/EpidemicMessenger
   (start [this]
     (info "Starting Aeron Epidemic Messenger...")
     (AeronEpidemicMessenger. peer-config messenger-group monitoring
-                             (em/update-publisher this {:stream-id 1001 :site {:address "localhost" :port 40199} :peer-id 1111})
-                             (em/update-subscriber this {:stream-id 1001 :site {:address "localhost" :port 40199}  :peer-id 1111})))
+                             (em/update-subscriber this {:stream-id 1001 :site {:address "localhost" :port 40199} :peer-id 1111})
+                             (em/update-publisher this {:stream-id 1001 :site {:address "localhost" :port 40199}  :peer-id 1111})))
 
 
   (stop [messenger]
