@@ -25,7 +25,7 @@
                             ^:unsynchronized-mutable stream-id]
   epub/EpidemicPublisher
   (start [this]
-    (println "Starting Epidemic Publisher")
+    ;(println "Starting Epidemic Publisher")
     (let [error-handler (reify ErrorHandler
                           (onError [this x]
                             (.addAndGet errors 1)
@@ -54,11 +54,12 @@
     pub)
   (offer-log-event! [this log-event]
     (let [msg {:type 101 :data log-event}
-          _ (println "offering log event")
+          ;_ (println "offering log event")
           buf (dummy-serialize msg)
-          _ (println "after buf creation")
-          ret (.offer ^Publication publication buf 0 (.capacity buf))]
-      (println (str "Offered log event from epidemic publisher, ret: " ret)))))
+          ;_ (println "after buf creation")
+          ret (.offer ^Publication publication buf 0 (.capacity buf))])))
+      ;(println (str "Offered log event from epidemic publisher, ret: " ret))
+
 
 
 

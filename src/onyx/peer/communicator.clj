@@ -7,15 +7,17 @@
             [onyx.static.uuid :refer [random-uuid]]
             [onyx.extensions :as extensions]
             [onyx.peer.log-version]
-            [onyx.static.default-vals :refer [arg-or-default]]))
+            [onyx.static.default-vals :refer [arg-or-default]]
+            [clojure.string :as str]))
 
 (defn outbox-loop [log outbox-ch group-ch]
   (loop []
     (when-let [entry (<!! outbox-ch)]
       (try
        (trace "Log Writer: wrote - " entry)
-       (extensions/write-log-entry log entry)
-       (put! group-ch [:epidemic-log-event entry])
+       (let [log-entry-info (extensions/write-log-entry log entry)
+             log-entry {:log-info log-entry-info :log-entry entry}]
+          (put! group-ch [:epidemic-log-event log-entry]))
        (catch Throwable e
          (warn e "Replica services couldn't write to ZooKeeper.")
          (>!! group-ch [:restart-peer-group])))
@@ -80,19 +82,56 @@
 (defn replica-subscription [peer-config]
   (->ReplicaSubscription peer-config))
 
+; the record responsible for actually applying the received log-entries
+; keeps track of latest log-position and the current epidemic-record which is closest to the position number
+; in the log.
+(defn parse-entry [entry]
+  (Integer/parseInt (last (str/split (str/trim (:log-info (:data entry))) #"-"))))
+
+(def counter (atom -1))
+
+(defn next-value []
+  (swap! counter inc))
+
+(defn epidemic-listening-loop [incoming-ch log-entries]
+  (loop []
+    (when-let [log-entry (<!! incoming-ch)]
+      (println (str "EPIDEMIC ENTRIES RECEIVED: " (next-value) (sort-by parse-entry (conj log-entries log-entry)))))
+    (recur)))
+
+(defrecord EpidemicApplier [peer-config]
+  component/Lifecycle
+
+  (start [{:keys [epidemic-messenger] :as component}]
+    (let [incoming-ch (:incoming-ch epidemic-messenger)
+          log-entries #{}
+          epidemic-listening-thread (thread (epidemic-listening-loop incoming-ch log-entries))
+          ]
+      (assoc component
+        :incoming-ch incoming-ch)))
+  (stop [component]
+    (assoc component
+      :incoming-ch nil)))
+
+(defn epidemic-applier [peer-config]
+  (->EpidemicApplier peer-config))
+
 (defrecord OnyxComm []
   component/Lifecycle
   (start [this]
-    (component/start-system this [:log :logging-config :replica-subscription :log-writer]))
+    (component/start-system this [:log :logging-config :replica-subscription :log-writer :epidemic-applier]))
   (stop [this]
-    (component/stop-system this [:log :logging-config :replica-subscription :log-writer])))
+    (component/stop-system this [:log :logging-config :replica-subscription :log-writer :epidemic-applier])))
+
 
 (defn onyx-comm
-  [peer-config group-ch monitoring]
+  [peer-config group-ch monitoring epidemic-messenger]
    (map->OnyxComm
     {:config peer-config
      :logging-config (logging-config/logging-configuration peer-config)
      :monitoring monitoring
      :log (component/using (zookeeper peer-config) [:monitoring])
      :replica-subscription (component/using (replica-subscription peer-config) [:log])
-     :log-writer (component/using (log-writer peer-config group-ch) [:log])}))
+     :log-writer (component/using (log-writer peer-config group-ch) [:log])
+     :epidemic-messenger epidemic-messenger
+     :epidemic-applier (component/using (epidemic-applier peer-config) [:epidemic-messenger])}))

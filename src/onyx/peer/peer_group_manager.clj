@@ -53,9 +53,11 @@
   (curator/close (:conn (:log comm)))
   state)
 
-(defn start-communicator! [{:keys [peer-config monitoring group-ch] :as state}]
+(defn start-communicator! [{:keys [peer-config monitoring group-ch epidemic-messenger] :as state}]
   (assert (not (:comm state)))
-  (let [comm (component/start (comm/onyx-comm peer-config group-ch monitoring))]
+  (println "start-communicator!")
+  (let [comm (component/start (comm/onyx-comm peer-config group-ch monitoring epidemic-messenger))
+        _ (println "after comm init")]
     (-> state
         (assoc :inbox-ch (:inbox-ch (:replica-subscription comm)))
         (assoc :outbox-ch (:outbox-ch (:log-writer comm)))

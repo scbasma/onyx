@@ -5,16 +5,19 @@
             [onyx.messaging.protocols.epidemic-publisher :as epub]
             [onyx.messaging.aeron.epidemic-publisher :refer [new-epidemic-publisher]]
             [com.stuartsierra.component :as component]
-            [taoensso.timbre :refer [debug info warn]]))
+            [taoensso.timbre :refer [debug info warn]]
+            [clojure.core.async :refer [chan close!]]))
 
-(deftype AeronEpidemicMessenger [peer-config messenger-group monitoring
+(defn stream-pool [peer-count])
+
+(deftype AeronEpidemicMessenger [peer-config messenger-group monitoring incoming-ch
                                  ^:unsynchronized-mutable subscriber
                                  ^:unsynchronized-mutable publisher]
   em/EpidemicMessenger
   (start [this]
     (info "Starting Aeron Epidemic Messenger...")
-    (AeronEpidemicMessenger. peer-config messenger-group monitoring
-                             (em/update-subscriber this {:stream-id 1001 :site {:address "localhost" :port 40199} :peer-id 1111})
+    (AeronEpidemicMessenger. peer-config messenger-group monitoring incoming-ch
+                             (em/update-subscriber this {:stream-id 1001 :site {:address "localhost" :port 40199} :peer-id 1111} incoming-ch)
                              (em/update-publisher this {:stream-id 1001 :site {:address "localhost" :port 40199}  :peer-id 1111})))
 
 
@@ -26,12 +29,12 @@
     (set! publisher nil))
 
   (info [this])
-  (update-subscriber [messenger sub-info]
+  (update-subscriber [messenger sub-info incoming-ch]
     (assert sub-info)
     (set! subscriber
           (esub/update-stream-id
             (or subscriber (esub/start (new-epidemic-subscriber
-                                         (:peer-config messenger-group) monitoring 121 sub-info)))
+                                         (:peer-config messenger-group) monitoring 121 sub-info incoming-ch)))
             (:stream-id sub-info))))
   (update-publisher [messenger pub-info]
     (assert pub-info)
@@ -44,25 +47,28 @@
     (epub/offer-log-event! publisher log-event)))
 
 
-
-(defn build-aeron-epidemic-messenger [peer-config messenger-group monitoring]
-  (->AeronEpidemicMessenger peer-config messenger-group monitoring nil nil))
+(defn build-aeron-epidemic-messenger [peer-config messenger-group monitoring incoming-ch]
+  (->AeronEpidemicMessenger peer-config messenger-group monitoring incoming-ch nil nil))
 
 (defrecord EpidemicMessenger [peer-config messenger-group monitoring aeron-epidemic-messenger]
   component/Lifecycle
   (start [{:keys [messenger-group monitoring] :as component}]
-    (let [aeron-epidemic-messenger (em/start (build-aeron-epidemic-messenger peer-config messenger-group monitoring))]
+    (let [incoming-ch (chan 1000)
+          aeron-epidemic-messenger (em/start (build-aeron-epidemic-messenger peer-config messenger-group monitoring incoming-ch))]
       (assoc component
         :messenger-group messenger-group
         :monitoring monitoring
-        :aeron-epidemic-messenger aeron-epidemic-messenger)))
+        :aeron-epidemic-messenger aeron-epidemic-messenger
+        :incoming-ch incoming-ch)))
 
-  (stop [{:keys [messenger-group monitoring aeron-epidemic-messenger] :as component}]
+  (stop [{:keys [messenger-group monitoring aeron-epidemic-messenger incoming-ch] :as component}]
     (when aeron-epidemic-messenger (em/stop aeron-epidemic-messenger))
+    (close! incoming-ch)
     (assoc component
       :messenger-group nil
       :monitoring nil
-      :aeron-epidemic-messenger nil)))
+      :aeron-epidemic-messenger nil
+      :incoming-ch nil)))
 
 
 
