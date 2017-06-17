@@ -93,10 +93,15 @@
 (defn next-value []
   (swap! counter inc))
 
-(defn epidemic-listening-loop [incoming-ch log-entries]
+(defn add-entry [entries entry]
+  (swap! entries conj entry))
+
+(def log-entries (atom #{}))
+
+(defn epidemic-listening-loop [incoming-ch]
   (loop []
     (when-let [log-entry (<!! incoming-ch)]
-      (println (str "EPIDEMIC ENTRIES RECEIVED: " (next-value) (sort-by parse-entry (conj log-entries log-entry)))))
+      (println (str "EPIDEMIC ENTRIES RECEIVED: " (next-value) (sort-by parse-entry (add-entry log-entries log-entry)))))
     (recur)))
 
 (defrecord EpidemicApplier [peer-config]
@@ -104,8 +109,7 @@
 
   (start [{:keys [epidemic-messenger] :as component}]
     (let [incoming-ch (:incoming-ch epidemic-messenger)
-          log-entries #{}
-          epidemic-listening-thread (thread (epidemic-listening-loop incoming-ch log-entries))
+          epidemic-listening-thread (thread (epidemic-listening-loop incoming-ch))
           ]
       (assoc component
         :incoming-ch incoming-ch)))
