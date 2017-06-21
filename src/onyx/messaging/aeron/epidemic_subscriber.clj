@@ -7,7 +7,8 @@
             [onyx.messaging.serialize :as sz]
             [onyx.static.default-vals :refer [arg-or-default]]
             [onyx.messaging.aeron.utils :refer [try-close-conn try-close-subscription]]
-            [clojure.core.async :refer [>!!]])
+            [clojure.core.async :refer [>!!]]
+            [onyx.messaging.protocols.epidemic-messenger :as epm])
   (:import [java.util.concurrent.atomic AtomicLong]
            [org.agrona.concurrent UnsafeBuffer IdleStrategy BackoffIdleStrategy]
            [org.agrona ErrorHandler]
@@ -17,6 +18,7 @@
                      AvailableImageHandler]
            [io.aeron.logbuffer ControlledFragmentHandler ControlledFragmentHandler$Action FragmentHandler]
            (java.util.function Consumer)))
+
 
 
 (defn dummy-deserialize [^UnsafeBuffer buf offset length]
@@ -50,7 +52,7 @@
         (recur)))
     (info "Shutting down subscriber.")))
 
-(deftype EpidemicSubscriber [peer-id peer-config site batch-size incoming-ch ^AtomicLong read-bytes
+(deftype EpidemicSubscriber [messenger peer-id peer-config site batch-size incoming-ch ^AtomicLong read-bytes
                              ^AtomicLong error-counter error ^bytes bs channel ^Aeron conn
                              ^Subscription subscription lost-sessions
                              ^:unsynchronized-mutable ^ControlledFragmentAssembler assembler
@@ -77,7 +79,7 @@
           status-pubs {}
           status {}
           new-subscriber (esub/add-assembler
-                           (EpidemicSubscriber. peer-id peer-config site batch-size incoming-ch read-bytes
+                           (EpidemicSubscriber.  messenger peer-id peer-config site batch-size incoming-ch read-bytes
                                                 error-counter error bs channel conn sub lost-sessions
                                                 nil stream-id nil nil))
           shutdown (atom false)
@@ -87,7 +89,7 @@
   (stop [this]
     (some-> subscription try-close-subscription)
     (some-> conn try-close-conn)
-    (EpidemicSubscriber. peer-id peer-config site batch-size incoming-ch (AtomicLong.)
+    (EpidemicSubscriber. messenger peer-id peer-config site batch-size incoming-ch (AtomicLong.)
                         (AtomicLong. ) (atom nil) (byte-array (autil/max-message-length))
                         nil nil nil nil nil nil nil nil))
 
@@ -109,11 +111,11 @@
   (onFragment [this buffer offset length header]
     (let [message (dummy-deserialize buffer (inc offset) (dec length))]
       (println "putting log-event message: " message)
-      (>!! incoming-ch message))))
+      (epm/update-log-entries messenger message))))
 
 
-(defn new-epidemic-subscriber [peer-config monitoring peer-id
+(defn new-epidemic-subscriber [messenger peer-config monitoring peer-id
                                {:keys [site batch-size] :as sub-info} incoming-ch]
-  (->EpidemicSubscriber peer-id peer-config site batch-size incoming-ch (AtomicLong.)
+  (->EpidemicSubscriber messenger peer-id peer-config site batch-size incoming-ch (AtomicLong.)
                         (AtomicLong. ) (atom nil) (byte-array (autil/max-message-length))
                         nil nil nil nil nil nil nil nil))

@@ -9,4 +9,5 @@
   (info [messenger])
   (update-subscriber [messenger sub-info incoming-ch])
   (update-publisher [messenger pub-infos])
+  (update-log-entries [messenger log-event])
   (offer-log-event! [messenger log-event]))

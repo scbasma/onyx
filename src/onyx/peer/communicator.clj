@@ -83,26 +83,14 @@
   (->ReplicaSubscription peer-config))
 
 ; the record responsible for actually applying the received log-entries
-; keeps track of latest log-position and the current epidemic-record which is closest to the position number
-; in the log.
-(defn parse-entry [entry]
-  (Integer/parseInt (last (str/split (str/trim (:log-info (:data entry))) #"-"))))
-
-(def counter (atom -1))
-
-(defn next-value []
-  (swap! counter inc))
-
-(defn add-entry [entries entry]
-  (swap! entries conj entry))
-
-(def log-entries (atom #{}))
+; Should keep track of latest log-position and should receive the log-entry which is closest to the position number
+; in the log from the epidemic-messenger.
 
 (defn epidemic-listening-loop [incoming-ch]
   (loop []
     (when-let [log-entry (<!! incoming-ch)]
-      (println (str "EPIDEMIC ENTRIES RECEIVED: " (next-value) (sort-by parse-entry (add-entry log-entries log-entry)))))
-    (recur)))
+      (println (str "EPIDEMIC ENTRIES RECEIVED IN COMM: " log-entry))
+      (recur))))
 
 (defrecord EpidemicApplier [peer-config]
   component/Lifecycle
@@ -112,9 +100,12 @@
           epidemic-listening-thread (thread (epidemic-listening-loop incoming-ch))
           ]
       (assoc component
+        :epidemic-listening-thread epidemic-listening-thread
         :incoming-ch incoming-ch)))
   (stop [component]
+    (close! (:incoming-ch component))
     (assoc component
+      :epidemic-listening-thread nil
       :incoming-ch nil)))
 
 (defn epidemic-applier [peer-config]
