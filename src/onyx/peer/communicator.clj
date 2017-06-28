@@ -1,5 +1,5 @@
 (ns onyx.peer.communicator
-  (:require [clojure.core.async :refer [>!! <!! alts!! promise-chan close! chan thread poll! put!]]
+  (:require [clojure.core.async :refer [>!! <!! alts!! promise-chan close! chan thread poll! put! mult tap untap]]
             [com.stuartsierra.component :as component]
             [taoensso.timbre :refer [info error warn fatal trace]]
             [onyx.static.logging-configuration :as logging-config]
@@ -67,16 +67,22 @@
   (start [{:keys [log] :as component}]
     (taoensso.timbre/info "Starting Replica Subscription")
     (let [group-id (random-uuid)
-          inbox-ch (chan (arg-or-default :onyx.peer/inbox-capacity peer-config))
-          origin (extensions/subscribe-to-log log inbox-ch)]
+
+          write-inbox-ch (chan (arg-or-default :onyx.peer/inbox-capacity peer-config))
+          mult-inbox-ch (mult write-inbox-ch)
+          tapped-inbox-ch (tap mult-inbox-ch (chan (arg-or-default :onyx.peer/inbox-capacity peer-config)))
+          origin (extensions/subscribe-to-log log write-inbox-ch)]
       (assoc component
              :group-id group-id
-             :inbox-ch inbox-ch
+             :write-inbox-ch write-inbox-ch
+             :mult-inbox-ch mult-inbox-ch
+             :inbox-ch tapped-inbox-ch
              :replica-origin origin)))
 
   (stop [component]
     (taoensso.timbre/info "Stopping Replica Subscription")
-    (close! (:inbox-ch component))
+    (untap (:mult-inbox-ch component) (:inbox-ch component))
+    (close! (:write-inbox-ch component))
     component))
 
 (defn replica-subscription [peer-config]
@@ -86,27 +92,36 @@
 ; Should keep track of latest log-position and should receive the log-entry which is closest to the position number
 ; in the log from the epidemic-messenger.
 
-(defn epidemic-listening-loop [incoming-ch]
+(defn epidemic-listening-loop [incoming-ch inbox-ch]
   (loop []
-    (when-let [log-entry (<!! incoming-ch)]
-      (println (str "EPIDEMIC ENTRIES RECEIVED IN COMM: " log-entry))
+    (when-let [log-entry (<!! inbox-ch)]
+      ;(println (str "Log-entry position from inbox-ch "   (:message-id log-entry)))
       (recur))))
 
 (defrecord EpidemicApplier [peer-config]
   component/Lifecycle
 
-  (start [{:keys [epidemic-messenger] :as component}]
+  (start [{:keys [epidemic-messenger replica-subscription] :as component}]
     (let [incoming-ch (:incoming-ch epidemic-messenger)
-          epidemic-listening-thread (thread (epidemic-listening-loop incoming-ch))
+          mult-inbox (:mult-inbox-ch replica-subscription)
+          inbox-ch (tap mult-inbox (chan (arg-or-default :onyx.peer/inbox-capacity peer-config)))
+          epidemic-listening-thread (thread (epidemic-listening-loop incoming-ch inbox-ch))
           ]
+
       (assoc component
         :epidemic-listening-thread epidemic-listening-thread
-        :incoming-ch incoming-ch)))
+        :mult-inbox mult-inbox
+        :incoming-ch incoming-ch
+        :inbox-ch inbox-ch)))
   (stop [component]
     (close! (:incoming-ch component))
+    (untap (:mult-inbox component) (:inbox-ch component))
+    (close! (:inbox-ch component))
     (assoc component
       :epidemic-listening-thread nil
-      :incoming-ch nil)))
+      :incoming-ch nil
+      :mult-inbox nil
+      :tapped-inbox-ch nil)))
 
 (defn epidemic-applier [peer-config]
   (->EpidemicApplier peer-config))
@@ -119,8 +134,7 @@
     (component/stop-system this [:log :logging-config :replica-subscription :log-writer :epidemic-applier])))
 
 
-(defn onyx-comm
-  [peer-config group-ch monitoring epidemic-messenger]
+(defn onyx-comm [peer-config group-ch monitoring epidemic-messenger]
    (map->OnyxComm
     {:config peer-config
      :logging-config (logging-config/logging-configuration peer-config)
@@ -129,4 +143,4 @@
      :replica-subscription (component/using (replica-subscription peer-config) [:log])
      :log-writer (component/using (log-writer peer-config group-ch) [:log])
      :epidemic-messenger epidemic-messenger
-     :epidemic-applier (component/using (epidemic-applier peer-config) [:epidemic-messenger])}))
+     :epidemic-applier (component/using (epidemic-applier peer-config) [:epidemic-messenger :replica-subscription])}))
