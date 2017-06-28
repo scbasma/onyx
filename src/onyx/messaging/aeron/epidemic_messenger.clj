@@ -14,11 +14,6 @@
 (defn parse-entry [entry]
   (Integer/parseInt (last (str/split (str/trim (:log-info (:data entry))) #"-"))))
 
-(defn epidemic-listening-loop [incoming-ch log-entries]
-  (loop []
-    (when-let [log-entry (<!! incoming-ch)]
-      (println (str "EPIDEMIC ENTRIES RECEIVED: " (sort-by parse-entry (conj log-entries log-entry))))
-      (recur))))
 
 (deftype AeronEpidemicMessenger [peer-config messenger-group monitoring incoming-ch
                                  ^:unsynchronized-mutable log-entries
