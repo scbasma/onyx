@@ -15,7 +15,7 @@
            [onyx.messaging.aeron.int2objectmap CljInt2ObjectHashMap]
            [io.aeron Aeron Aeron$Context Publication Subscription Image
                      ControlledFragmentAssembler UnavailableImageHandler
-                     AvailableImageHandler]
+                     AvailableImageHandler FragmentAssembler]
            [io.aeron.logbuffer ControlledFragmentHandler ControlledFragmentHandler$Action FragmentHandler]
            (java.util.function Consumer)))
 
@@ -28,12 +28,13 @@
 
 (def fragment-limit-receiver 100000)
 
-(defn consumer [subscription idle-strategy shutdown failed]
+(defn consumer [subscription ^IdleStrategy idle-strategy shutdown failed]
   (reify Consumer
     (accept [this subscription]
       (while (and (not @shutdown) (not @failed))
         (let [fragments-read (esub/poll! subscription)]
-          (.idle idle-strategy fragments-read))))))
+          (if fragments-read (.idle idle-strategy fragments-read)))))))
+
 
 (defn start-subscriber! [subscription shutdown peer-config]
   (future
@@ -46,6 +47,7 @@
           (try (.accept ^Consumer (consumer subscription idle-strategy shutdown failed) subscription)
              (catch Throwable e
                (reset! failed true)
+               (println (str "Failed subscriber: " (.printStackTrace e)))
                (warn "Subscriber failed: " e))))
       (when-not @shutdown
         (info "Subscriber failed.")
@@ -75,15 +77,13 @@
           channel (autil/channel peer-config)
           stream-id 1001
           sub (.addSubscription conn channel stream-id available-image-handler unavailable-image-handler)
-          sources []
-          status-pubs {}
-          status {}
           new-subscriber (esub/add-assembler
                            (EpidemicSubscriber.  messenger peer-id peer-config site batch-size incoming-ch read-bytes
                                                 error-counter error bs channel conn sub lost-sessions
                                                 nil stream-id nil nil))
           shutdown (atom false)
           listening-thread (start-subscriber! new-subscriber shutdown peer-config)]
+
     ;(info "Created subscriber" (esub/info new-subscriber))
      new-subscriber))
   (stop [this]
@@ -94,25 +94,21 @@
                         nil nil nil nil nil nil nil nil))
 
   (add-assembler [this]
-    (set! assembler (ControlledFragmentAssembler. this))
+    (set! assembler (FragmentAssembler. this))
     this)
   (update-stream-id [sub new-stream-id]
     (set! stream-id new-stream-id)
     sub)
   (poll! [this]
     (when @error (throw @error))
-    (set! batch nil)
-    (->> (.controlledPoll ^Subscription subscription
-                          ^ControlledFragmentHandler assembler
-                          fragment-limit-receiver)
-         (.addAndGet read-bytes))
-    batch)
-  ControlledFragmentHandler
+    (.poll ^Subscription subscription
+                          ^FragmentHandler assembler
+                          10))
+  FragmentHandler
   (onFragment [this buffer offset length header]
     (let [message (dummy-deserialize buffer (inc offset) (dec length))]
-      (println "putting log-event message: " message)
+      (println (str "message to update-log-entries: " message))
       (epm/update-log-entries messenger message))))
-
 
 (defn new-epidemic-subscriber [messenger peer-config monitoring peer-id
                                {:keys [site batch-size] :as sub-info} incoming-ch]
