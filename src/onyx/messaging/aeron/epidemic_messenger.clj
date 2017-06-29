@@ -12,7 +12,9 @@
 (defn stream-pool [peer-count])
 
 (defn parse-entry [entry]
-  (Integer/parseInt (last (str/split (str/trim (:log-info (:data entry))) #"-"))))
+  (if entry
+    (Integer/parseInt (last (str/split (str/trim (:log-info (:data entry))) #"-")))
+    0))
 
 
 (deftype AeronEpidemicMessenger [peer-config messenger-group monitoring incoming-ch
@@ -53,9 +55,12 @@
             (:stream-id pub-info))))
 
   (update-log-entries [messenger log-event]
-    (let [earlier-first (first log-entries)]
-      (set! log-entries (reverse (sort-by parse-entry (conj log-entries log-event))))
-      (>!! incoming-ch (first log-entries))))
+    (let [earlier-first (parse-entry (first log-entries))
+          log-entries (set! log-entries (reverse (sort-by parse-entry (conj log-entries log-event))))
+          new-first (parse-entry (first log-entries))]
+      (if (> new-first earlier-first)
+        (>!! incoming-ch (first log-entries)))
+      (first log-entries)))
 
   (offer-log-event! [messenger log-event]
     (epub/offer-log-event! publisher log-event)))
@@ -74,7 +79,6 @@
         :monitoring monitoring
         :aeron-epidemic-messenger aeron-epidemic-messenger
         :incoming-ch incoming-ch)))
-
   (stop [{:keys [messenger-group monitoring aeron-epidemic-messenger incoming-ch] :as component}]
     (when aeron-epidemic-messenger (em/stop aeron-epidemic-messenger))
     (close! incoming-ch)
