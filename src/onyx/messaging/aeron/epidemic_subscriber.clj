@@ -65,6 +65,7 @@
   esub/EpidemicSubscriber
   (start [this]
     (let [
+          _ (println "MESSENGER ID IN SUBSCRIBER: " (epm/get-messenger-id messenger))
           media-driver-dir (:onyx.messaging.aeron/media-driver-dir peer-config)
           lost-sessions (atom #{})
           sinfo [peer-id site]
@@ -74,7 +75,8 @@
           available-image-handler (available-image sinfo lost-sessions)
           unavailable-image-handler (unavailable-image sinfo)
           conn (Aeron/connect ctx)
-          channel (autil/channel peer-config)
+          _ (println "PEER CONFIG IN SUB: " peer-config)
+          channel (autil/channel "localhost" 40199)
           stream-id 1001
           sub (.addSubscription conn channel stream-id available-image-handler unavailable-image-handler)
           new-subscriber (esub/add-assembler
@@ -107,8 +109,7 @@
   FragmentHandler
   (onFragment [this buffer offset length header]
     (let [message (dummy-deserialize buffer (inc offset) (dec length))]
-      (println (str "message to update-log-entries: " message))
-      (epm/update-log-entries messenger message))))
+        (epm/update-log-entries messenger message))))
 
 (defn new-epidemic-subscriber [messenger peer-config monitoring peer-id
                                {:keys [site batch-size] :as sub-info} incoming-ch]

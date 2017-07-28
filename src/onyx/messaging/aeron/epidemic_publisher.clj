@@ -28,6 +28,7 @@
     ;(println "Starting Epidemic Publisher")
     (let [error-handler (reify ErrorHandler
                           (onError [this x]
+                            (println (str "ERROR: " x))
                             (.addAndGet errors 1)
                             (reset! error x)))
           media-driver-dir (:onyx-messaging.aeron/media-driver-dir peer-config)
@@ -42,18 +43,15 @@
 
   (stop [this]
     (info "Stopping Epidemic Publisher")
-    (try
-       (when publication (.close publication))
-       (catch io.aeron.exceptions.RegistrationException re
-         (info "Registration exception closing epidemic publisher" re)))
-    (when conn (.close conn))
+    (some-> publication autil/try-close-publication)
+    (some-> conn autil/try-close-conn)
     (EpidemicPublisher. peer-config src-peer-id site written-bytes errors nil nil error nil))
 
   (update-stream-id [pub new-stream-id]
     (set! stream-id new-stream-id)
     pub)
   (offer-log-event! [this log-event]
-    (let [msg {:type 101 :data log-event}
+    (let [msg (assoc log-event :type 101)
           ;_ (println "offering log event")
           buf (dummy-serialize msg)
           ;_ (println "after buf creation")
