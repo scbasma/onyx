@@ -8,7 +8,9 @@
             [onyx.extensions :as extensions]
             [onyx.peer.log-version]
             [onyx.static.default-vals :refer [arg-or-default]]
-            [clojure.string :as str]))
+            [clojure.string :as str]
+            [onyx.messaging.protocols.epidemic-messenger :as epm]
+            [onyx.messaging.aeron.epidemic-messenger :refer [parse-entry]]))
 
 (defn outbox-loop [log outbox-ch group-ch]
   (loop []
@@ -61,28 +63,78 @@
 (defn log-writer [peer-config group-ch]
   (->LogWriter peer-config group-ch))
 
+
+(defn next-entry? [entry-state entry]
+  (if (some? entry)
+    (= (:message-id entry) (inc (:pos entry-state)))
+    false))
+
+(defn add-entry-to-state [entry-state new-entry]
+  (if (some? new-entry)
+    (if (nil? (:pos entry-state))
+      (assoc entry-state :pos (:message-id new-entry))
+      (let [entry-pos (:message-id new-entry)
+            pos (:pos entry-state)
+            entries (:entries entry-state)]
+        (if (nil? entry-pos)
+          (println "ENTRY POS NIL: " entry-pos))
+        (assert entry-pos)
+        (assert pos)
+        (if (<= entry-pos pos)
+          entry-state
+          (cond-> entry-state
+            true (assoc :entries (filter #(<= (:message-id %) pos)
+                                           (sort-by :message-id (conj entries new-entry))))
+            (next-entry? entry-state new-entry) (assoc :pos entry-pos)))))))
+
+
+(defn log-entry-listening-loop [epidemic-inbox-ch log-inbox-ch inbox-ch]
+  (loop [entry-state {:pos nil :entries []}]
+    (let [
+          chs [log-inbox-ch]
+          [log-entry ch] (alts!! chs :priority true)
+          new-entry-state (if (and (nil? (:pos entry-state)) (some? log-entry))
+                            (if (= ch log-inbox-ch) ; if pos is nil, first pos should be from log-ch
+                              (add-entry-to-state entry-state log-entry))
+                            (add-entry-to-state entry-state log-entry))]
+      ;(println (str "entry-state map: " new-entry-state "\n\t with log-entry: " log-entry))
+
+      (if (some? log-entry)
+        (let [entries (:entries new-entry-state)]
+          (if (nil? (:pos entry-state)) ;if pos is nil, this is first log-entry and should be collected from the log.
+            (>!! inbox-ch log-entry)
+           (if (= (:pos new-entry-state) (inc (:pos entry-state)) ) ;if pos is not nil and log-entry next in line, write to inbox-ch
+             (>!! inbox-ch log-entry)
+             (if (next-entry? new-entry-state (first entries))
+                 (>!! inbox-ch (first entries)))))
+           ;if log-entry is not nil and not next in line, it means it is ahead of the replica, should check here too see if any other entry is applicable
+          (recur (if (next-entry? new-entry-state (first entries))
+                 (assoc new-entry-state :pos (:message-id log-entry))
+                 new-entry-state)))))))
+
 (defrecord ReplicaSubscription [peer-config]
   component/Lifecycle
 
-  (start [{:keys [log] :as component}]
+  (start [{:keys [log epidemic-subscription] :as component}]
     (taoensso.timbre/info "Starting Replica Subscription")
     (let [group-id (random-uuid)
-
-          write-inbox-ch (chan (arg-or-default :onyx.peer/inbox-capacity peer-config))
-          mult-inbox-ch (mult write-inbox-ch)
-          tapped-inbox-ch (tap mult-inbox-ch (chan (arg-or-default :onyx.peer/inbox-capacity peer-config)))
-          origin (extensions/subscribe-to-log log write-inbox-ch)]
+          log-inbox-ch (chan (arg-or-default :onyx.peer/inbox-capacity peer-config))
+          epidemic-inbox-ch (:incoming-ch epidemic-subscription)
+          inbox-ch (chan (arg-or-default :onyx.peer/inbox-capacity peer-config))
+          origin (extensions/subscribe-to-log log log-inbox-ch)
+          event-listening-thread (thread (log-entry-listening-loop epidemic-inbox-ch log-inbox-ch inbox-ch))
+          ]
       (assoc component
              :group-id group-id
-             :write-inbox-ch write-inbox-ch
-             :mult-inbox-ch mult-inbox-ch
-             :inbox-ch tapped-inbox-ch
+             :log-inbox-ch log-inbox-ch
+             :inbox-ch inbox-ch
              :replica-origin origin)))
 
   (stop [component]
     (taoensso.timbre/info "Stopping Replica Subscription")
-    (untap (:mult-inbox-ch component) (:inbox-ch component))
-    (close! (:write-inbox-ch component))
+    (close! (:log-inbox-ch component))
+    (close! (:inbox-ch component))
+    (<!! (:event-listening-thread component))
     component))
 
 (defn replica-subscription [peer-config]
@@ -92,24 +144,14 @@
 ; Should keep track of latest log-position and should receive the log-entry which is closest to the position number
 ; in the log from the epidemic-messenger.
 
-(defn epidemic-listening-loop [incoming-ch inbox-ch]
-  (loop []
-    (when-let [log-entry (<!! inbox-ch)]
-      ;(println (str "Log-entry position from inbox-ch "   (:message-id log-entry)))
-      (recur))))
 
 (defrecord EpidemicApplier [peer-config]
   component/Lifecycle
-
   (start [{:keys [epidemic-messenger replica-subscription] :as component}]
     (let [incoming-ch (:incoming-ch epidemic-messenger)
           mult-inbox (:mult-inbox-ch replica-subscription)
-          inbox-ch (tap mult-inbox (chan (arg-or-default :onyx.peer/inbox-capacity peer-config)))
-          epidemic-listening-thread (thread (epidemic-listening-loop incoming-ch inbox-ch))
-          ]
-
+          inbox-ch (tap mult-inbox (chan (arg-or-default :onyx.peer/inbox-capacity peer-config)))]
       (assoc component
-        :epidemic-listening-thread epidemic-listening-thread
         :mult-inbox mult-inbox
         :incoming-ch incoming-ch
         :inbox-ch inbox-ch)))
@@ -118,7 +160,6 @@
     (untap (:mult-inbox component) (:inbox-ch component))
     (close! (:inbox-ch component))
     (assoc component
-      :epidemic-listening-thread nil
       :incoming-ch nil
       :mult-inbox nil
       :tapped-inbox-ch nil)))
@@ -129,9 +170,9 @@
 (defrecord OnyxComm []
   component/Lifecycle
   (start [this]
-    (component/start-system this [:log :logging-config :replica-subscription :log-writer :epidemic-applier]))
+    (component/start-system this [:log :logging-config :replica-subscription :log-writer]))
   (stop [this]
-    (component/stop-system this [:log :logging-config :replica-subscription :log-writer :epidemic-applier])))
+    (component/stop-system this [:log :logging-config :replica-subscription :log-writer])))
 
 
 (defn onyx-comm [peer-config group-ch monitoring epidemic-messenger]
@@ -140,7 +181,7 @@
      :logging-config (logging-config/logging-configuration peer-config)
      :monitoring monitoring
      :log (component/using (zookeeper peer-config) [:monitoring])
-     :replica-subscription (component/using (replica-subscription peer-config) [:log])
      :log-writer (component/using (log-writer peer-config group-ch) [:log])
-     :epidemic-messenger epidemic-messenger
-     :epidemic-applier (component/using (epidemic-applier peer-config) [:epidemic-messenger :replica-subscription])}))
+     :epidemic-subscription epidemic-messenger
+     :replica-subscription (component/using (replica-subscription peer-config) [:log :epidemic-subscription])
+     }))
