@@ -17,8 +17,9 @@
 (defn stream-pool [peer-count])
 
 (defn parse-entry [entry]
-  (if (:log-info (:data entry))
-    (Integer/parseInt (last (str/split (str/trim (:log-info (:data entry))) #"-")))
+  ;(println "PARSE-ENTRY: " entry)
+  (if (:data (:log-info entry))
+    (Integer/parseInt (last (str/split (str/trim (:log-info entry)) #"-")))
     0))
 
 
@@ -30,14 +31,10 @@
   emp/EpidemicMessenger
   (start [this]
     (info "Starting Aeron Epidemic Messenger...")
-    (let [subscriber (emp/update-subscriber
-                       this {:stream-id 1001 :site {:address "localhost" :port 40199} :peer-id 1111} incoming-ch)
-          publisher (emp/update-publisher
-                      this {:stream-id 1001 :site {:address "localhost" :port 40199}  :peer-id 1111})]
-      (assert subscriber)
-      (assert publisher)
       (assert incoming-ch)
-      (AeronEpidemicMessenger. peer-config messenger-group monitoring incoming-ch messenger-id #{} subscriber publisher)))
+      (-> (AeronEpidemicMessenger. peer-config messenger-group monitoring incoming-ch messenger-id #{} nil nil)
+          (emp/update-publisher {:stream-id 1001 :site {:address "localhost" :port 40199} :peer-id 1111})
+          (emp/update-subscriber {:stream-id 1001 :site {:address "localhost" :port 40199} :peer-id 1111} incoming-ch) ))
 
 
   (stop [messenger]
@@ -56,14 +53,16 @@
           (esub/update-stream-id
             (or subscriber (esub/start (new-epidemic-subscriber
                                          messenger peer-config monitoring 121 sub-info incoming-ch)))
-            (:stream-id sub-info))))
+            (:stream-id sub-info)))
+    messenger)
   (update-publisher [messenger pub-info]
     (assert pub-info)
     (set! publisher
           (epub/update-stream-id
             (or publisher (epub/start (new-epidemic-publisher
                                         peer-config monitoring pub-info)))
-            (:stream-id pub-info))))
+            (:stream-id pub-info)))
+    messenger)
 
   (initiate-log-entries [messenger initial-log-entries]
     (set! log-entries initial-log-entries))
@@ -85,7 +84,12 @@
       (if (not (some #(= messenger-id %) (:transmitter-list log-event)))
         (emp/offer-log-event! messenger
                               (assoc log-event :transmitter-list (conj (:transmitter-list log-event) messenger-id))))
-      (emp/offer-log-event! messenger (assoc log-event :transmitter-list (conj [] messenger-id))))
+      (do
+        (println "LOG-EVENT: " log-event)
+        (emp/offer-log-event! messenger {:log-info "1"} ;(->  log-event
+                                          ; (assoc :transmitter-list (conj [] messenger-id))
+                                           ;(assoc :message-id (parse-entry log-event))
+                                           )))
     messenger)
   (get-latest-log-event [messenger]
     (first log-entries))
@@ -94,11 +98,13 @@
   (get-messenger-id [messenger]
     messenger-id)
   (offer-log-event! [messenger log-event]
+    (assert publisher)
     (when (nil? publisher) (emp/update-publisher messenger {:stream-id 1001 :site {:address "localhost" :port 40199}  :peer-id 1111}))
     (if-let [TTL (:TTL log-event)]
       (if (not (zero? (dec (:TTL log-event))))
         (epub/offer-log-event! publisher (assoc log-event :TTL (dec TTL))))
-      (epub/offer-log-event! publisher (assoc log-event :TTL 2))))
+      ;(epub/offer-log-event! publisher (assoc log-event :TTL 2))
+      (epub/offer-log-event! publisher log-event)))
 
   (subscriber [messenger]
     subscriber))
