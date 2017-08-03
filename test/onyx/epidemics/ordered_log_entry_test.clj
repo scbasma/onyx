@@ -39,4 +39,5 @@
       (is (= (first log-entries) (epm/get-latest-log-event (epm/update-log-entries messenger (first log-entries)))))
       (doall (map #(epm/update-log-entries messenger %) log-entries))
       (is (= (last log-entries ) (epm/get-latest-log-event messenger)))
+      (is (= (last log-entries) (epm/get-latest-log-event (epm/update-log-entries messenger (first log-entries)))))
       (epm/stop messenger)))))

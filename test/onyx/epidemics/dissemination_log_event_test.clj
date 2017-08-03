@@ -11,17 +11,17 @@
     [onyx.messaging.aeron.embedded-media-driver :as em]))
 
 
-(def log-entries [{:data {:log-info "/log/entry-00000000"}}
-                  {:data {:log-info "/log/entry-00000001"}}
-                  {:data {:log-info "/log/entry-00000002"}}
-                  {:data {:log-info "/log/entry-00000003"}}
-                  {:data {:log-info "/log/entry-00000004"}}
-                  {:data {:log-info "/log/entry-00000005"}}
-                  {:data {:log-info "/log/entry-00000006"}}
-                  {:data {:log-info "/log/entry-00000007"}}
-                  {:data {:log-info "/log/entry-00000008"}}
-                  {:data {:log-info "/log/entry-00000009"}}
-                  {:data {:log-info "/log/entry-00000010"}}])
+(def log-entries [{:message-id 0}
+                  {:message-id 1}
+                  {:message-id 2}
+                  {:message-id 3}
+                  {:message-id 4}
+                  {:message-id 5}
+                  {:message-id 6}
+                  {:message-id 7}
+                  {:message-id 8}
+                  {:message-id 9}
+                  {:message-id 10}])
 
 (defn drain-channel [ep-ch]
   (loop [n (count log-entries) received-entries []]
@@ -32,7 +32,7 @@
 
 ; note: this test will actually start up 3 messengers, as test-env macro will start up a peer-group
 ; this is needed because I need to start up the aeron media driver
-(deftest dissemination-log-event-test-2-peers
+(deftest ^:broken dissemination-log-event-test-2-peers
   (testing "update log entry functions correctly in epidemic messenger")
   (let [config (load-config)
         onyx-id (random-uuid)
@@ -55,11 +55,14 @@
         (try
            (is (empty? (epm/get-all-log-events messenger-1)))
            (is (empty? (epm/get-all-log-events messenger-2)))
-           (is (= ((:data (first log-entries)) (:data (epm/update-log-entries messenger-1 (first log-entries))))))
+           (is (= (:message-id (first log-entries)) (:message-id (epm/get-latest-log-event (epm/update-log-entries messenger-1 (first log-entries)))) ))
+           (println "after first test!!")
            (when-let [received-entry (<!! epidemic-ch-2)]
-            (is (= (:data (first log-entries)) (:data received-entry)))
+            (is (= (:message-id (first log-entries)) (:message-id received-entry)))
             )
+           (println "after second test!!")
            (doall (map #(epm/update-log-entries messenger-1 %) log-entries))
+           (println "after doall!")
            ;in order to let the messages propagate to messenger
            (Thread/sleep (/ liveness-timeout 2))
            (close! epidemic-ch-2)

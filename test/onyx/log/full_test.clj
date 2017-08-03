@@ -12,13 +12,13 @@
 
 (use-fixtures :once schema.test/validate-schemas)
 
-(deftest ^:smoke log-full-test
+(deftest log-full-test
   (testing "groups all join and watch each other"
     (let [config (load-config)
           onyx-id (random-uuid)
           env-config (assoc (:env-config config) :onyx/tenancy-id onyx-id)
           peer-config (assoc (:peer-config config) :onyx/tenancy-id onyx-id)
-          n-groups 20]
+          n-groups 6]
       (with-test-env [test-env [0 env-config peer-config]]
         (let [added-group-cfg
               (-> peer-config
