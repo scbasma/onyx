@@ -18,7 +18,7 @@
 
 (defn parse-entry [entry]
   ;(println "PARSE-ENTRY: " entry)
-  (if (:data (:log-info entry))
+  (if (:log-info entry)
     (Integer/parseInt (last (str/split (str/trim (:log-info entry)) #"-")))
     0))
 
@@ -77,7 +77,10 @@
           ;_ (println (str "log entries in update-log-entries: " log-entries "with messenger id: " messenger-id))
           new-first (parse-entry (first new-log-entries))]
       (when (or (> new-first earlier-first) (= (count log-entries) 1))
-        (>!! incoming-ch (first log-entries))))
+        (>!! incoming-ch (if (:message-id (first log-entries))
+                           (first log-entries)
+                           (assoc (first log-entries) :message-id (parse-entry (first log-entries)))))
+        ))
 
     ;(println (str "Received log-event: " log-event "\n\t in messenger: " messenger-id "\n\t and log-entries: " log-entries))
     (if-let [transmitter-list (:transmitter-list log-event)]
@@ -85,11 +88,11 @@
         (emp/offer-log-event! messenger
                               (assoc log-event :transmitter-list (conj (:transmitter-list log-event) messenger-id))))
       (do
-        (println "LOG-EVENT: " log-event)
-        (emp/offer-log-event! messenger {:log-info "1"} ;(->  log-event
-                                          ; (assoc :transmitter-list (conj [] messenger-id))
-                                           ;(assoc :message-id (parse-entry log-event))
-                                           )))
+        ;(println "LOG-EVENT: " log-event)
+        (emp/offer-log-event! messenger (->  log-event
+                                            (assoc :transmitter-list (conj [] messenger-id))
+                                            (assoc :message-id (parse-entry log-event))
+                                           ))))
     messenger)
   (get-latest-log-event [messenger]
     (first log-entries))
@@ -98,13 +101,12 @@
   (get-messenger-id [messenger]
     messenger-id)
   (offer-log-event! [messenger log-event]
+    ;(println "offering log event: " log-event)
     (assert publisher)
-    (when (nil? publisher) (emp/update-publisher messenger {:stream-id 1001 :site {:address "localhost" :port 40199}  :peer-id 1111}))
     (if-let [TTL (:TTL log-event)]
       (if (not (zero? (dec (:TTL log-event))))
         (epub/offer-log-event! publisher (assoc log-event :TTL (dec TTL))))
-      ;(epub/offer-log-event! publisher (assoc log-event :TTL 2))
-      (epub/offer-log-event! publisher log-event)))
+      (epub/offer-log-event! publisher (assoc log-event :TTL 2))))
 
   (subscriber [messenger]
     subscriber))
