@@ -18,7 +18,7 @@
       (try
        (trace "Log Writer: wrote - " entry)
        (let [log-entry-info (extensions/write-log-entry log entry)
-             log-entry {:log-info log-entry-info :log-entry entry}]
+             log-entry (merge {:log-info log-entry-info} entry)]
           (put! group-ch [:epidemic-log-event log-entry]))
        (catch Throwable e
          (warn e "Replica services couldn't write to ZooKeeper.")
@@ -66,51 +66,70 @@
 
 (defn next-entry? [entry-state entry]
   (if (some? entry)
-    (= (:message-id entry) (inc (:pos entry-state)))
-    false))
+    (= (:message-id entry) (inc (:pos entry-state)))))
+
+(defn clean-entry [entry]
+  (reduce #(dissoc %1 %2 ) entry [:TTL :transmitter-list :log-info]))
 
 (defn add-entry-to-state [entry-state new-entry]
-  (if (some? new-entry)
-    (if (nil? (:pos entry-state))
-      (assoc entry-state :pos (:message-id new-entry))
+   (if (nil? (:pos entry-state))
+    (assoc entry-state :pos (:message-id new-entry))
+    (if (some? new-entry)
       (let [entry-pos (:message-id new-entry)
             pos (:pos entry-state)
             entries (:entries entry-state)]
-        (if (nil? entry-pos)
-          (println "ENTRY POS NIL: " entry-pos))
-        (assert entry-pos)
-        (assert pos)
-        (if (<= entry-pos pos)
+
+        (if (< entry-pos pos)
           entry-state
-          (cond-> entry-state
-            true (assoc :entries (filter #(<= (:message-id %) pos)
-                                           (sort-by :message-id (conj entries new-entry))))
-            (next-entry? entry-state new-entry) (assoc :pos entry-pos)))))))
+          (if (next-entry? entry-state new-entry)
+            (-> entry-state
+                (assoc :pos entry-pos)
+                (assoc :entries (distinct (filter #(> (:message-id %) entry-pos)
+                                           (sort-by :message-id entries)))))
+            (assoc entry-state :entries (sort-by :message-id (conj entries new-entry))))))
+      entry-state)))
 
 
 (defn log-entry-listening-loop [epidemic-inbox-ch log-inbox-ch inbox-ch]
   (loop [entry-state {:pos nil :entries []}]
-    (let [
-          chs [log-inbox-ch]
-          [log-entry ch] (alts!! chs :priority true)
-          new-entry-state (if (and (nil? (:pos entry-state)) (some? log-entry))
-                            (if (= ch log-inbox-ch) ; if pos is nil, first pos should be from log-ch
-                              (add-entry-to-state entry-state log-entry))
-                            (add-entry-to-state entry-state log-entry))]
-      ;(println (str "entry-state map: " new-entry-state "\n\t with log-entry: " log-entry))
-
+    (let [chs [log-inbox-ch epidemic-inbox-ch]
+          [dirty-log-entry ch] (alts!! chs :priority true)
+          log-entry (clean-entry dirty-log-entry)]
+      (println "ENTRY-STATE: " entry-state)
+      (println "LOG-ENTRY: " log-entry)
       (if (some? log-entry)
-        (let [entries (:entries new-entry-state)]
-          (if (nil? (:pos entry-state)) ;if pos is nil, this is first log-entry and should be collected from the log.
-            (>!! inbox-ch log-entry)
-           (if (= (:pos new-entry-state) (inc (:pos entry-state)) ) ;if pos is not nil and log-entry next in line, write to inbox-ch
-             (>!! inbox-ch log-entry)
-             (if (next-entry? new-entry-state (first entries))
-                 (>!! inbox-ch (first entries)))))
-           ;if log-entry is not nil and not next in line, it means it is ahead of the replica, should check here too see if any other entry is applicable
-          (recur (if (next-entry? new-entry-state (first entries))
-                 (assoc new-entry-state :pos (:message-id log-entry))
-                 new-entry-state)))))))
+        (if (nil? (:pos entry-state ))
+          (if (= ch log-inbox-ch)
+            (do
+                (>!! inbox-ch log-entry)
+              (recur (add-entry-to-state entry-state log-entry)))
+            (recur entry-state))
+          (let [new-entry-state (loop [state entry-state entry log-entry]
+                                   (let [old-pos (:pos state)
+                                         new-state (add-entry-to-state state entry)
+                                         new-pos (:pos new-state)]
+                                     (if (not= old-pos new-pos)
+                                       (do
+                                         (if (:log-entry entry)
+                                           (>!! inbox-ch (:log-entry entry))
+                                           (>!! inbox-ch entry)
+                                           )
+                                         (recur new-state (first (:entries new-state))))
+                                       new-state)))]
+            (recur new-entry-state)))))))
+
+      ;(if (some? log-entry)
+      ;  (let [entries (:entries new-entry-state)]
+      ;    (if (nil? (:pos entry-state)) ;if pos is nil, this is first log-entry and should be collected from the log.
+      ;      (>!! inbox-ch log-entry)
+      ;     (if (= (:pos new-entry-state) (inc (:pos entry-state)) ) ;if pos is not nil and log-entry next in line, write to inbox-ch
+      ;       (>!! inbox-ch log-entry)
+      ;       (if (next-entry? new-entry-state (first entries))
+      ;           (>!! inbox-ch (first entries)))))
+      ;     ;if log-entry is not nil and not next in line, it means it is ahead of the replica, should check here too see if any other entry is applicable
+      ;    (recur (if (next-entry? new-entry-state (first entries))
+      ;           (assoc new-entry-state :pos (:message-id log-entry))
+      ;           new-entry-state)))))))
 
 (defrecord ReplicaSubscription [peer-config]
   component/Lifecycle
