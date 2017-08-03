@@ -16,7 +16,6 @@
   (let [bs ^bytes (messaging-compress msg)
         length (inc (alength bs))
         buf (UnsafeBuffer. (byte-array length))]
-    (put-message-type buf 0 (:type msg))
     (.putBytes buf 1 bs)
     buf))
 
@@ -51,11 +50,13 @@
     (set! stream-id new-stream-id)
     pub)
   (offer-log-event! [this log-event]
-    (let [msg (assoc log-event :type 101)
-          ;_ (println "offering log event")
+    (let [msg log-event
+          ;_ (println "offering log event in publisher..")
           buf (dummy-serialize msg)
           ;_ (println "after buf creation")
-          ret (.offer ^Publication publication buf 0 (.capacity buf))])))
+          ret (.offer ^Publication publication buf 0 (.capacity buf))]
+      ;(println "ret in offer-log-event: " ret)
+      )))
       ;(println (str "Offered log event from epidemic publisher, ret: " ret))
 
 
