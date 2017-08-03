@@ -18,7 +18,7 @@
           onyx-id (random-uuid)
           env-config (assoc (:env-config config) :onyx/tenancy-id onyx-id)
           peer-config (assoc (:peer-config config) :onyx/tenancy-id onyx-id)
-          n-groups 6]
+          n-groups 20]
       (with-test-env [test-env [0 env-config peer-config]]
         (let [added-group-cfg
               (-> peer-config

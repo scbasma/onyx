@@ -106,7 +106,7 @@
     (if-let [TTL (:TTL log-event)]
       (if (not (zero? (dec (:TTL log-event))))
         (epub/offer-log-event! publisher (assoc log-event :TTL (dec TTL))))
-      (epub/offer-log-event! publisher (assoc log-event :TTL 2))))
+      (epub/offer-log-event! publisher (assoc log-event :TTL 1))))
 
   (subscriber [messenger]
     subscriber))
