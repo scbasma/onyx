@@ -10,7 +10,7 @@
             [clojure.core.async :refer [>!!]]
             [onyx.messaging.protocols.epidemic-messenger :as epm])
   (:import [java.util.concurrent.atomic AtomicLong]
-           [org.agrona.concurrent UnsafeBuffer IdleStrategy BackoffIdleStrategy]
+           [org.agrona.concurrent AtomicBuffer IdleStrategy BackoffIdleStrategy]
            [org.agrona ErrorHandler]
            [onyx.messaging.aeron.int2objectmap CljInt2ObjectHashMap]
            [io.aeron Aeron Aeron$Context Publication Subscription Image
@@ -21,7 +21,7 @@
 
 
 
-(defn dummy-deserialize [^UnsafeBuffer buf offset length]
+(defn dummy-deserialize [^AtomicBuffer buf offset length]
   (let [bs (byte-array length)]
     (.getBytes buf offset bs)
     (messaging-decompress bs)))
@@ -48,7 +48,9 @@
              (catch Throwable e
                (reset! failed true)
                (println (str "Failed subscriber: " (.printStackTrace e)))
-               (warn "Subscriber failed: " e))))
+               (warn "Subscriber failed: " e))
+               (finally
+                 (try-close-subscription subscription))))
       (when-not @shutdown
         (info "Subscriber failed.")
         (recur)))
@@ -60,10 +62,12 @@
                              ^:unsynchronized-mutable ^ControlledFragmentAssembler assembler
                              ^:unsynchronized-mutable stream-id
                              ^:unsynchronized-mutable publication
-                             ^:unsynchronized-mutable batch]
+                             ^:unsynchronized-mutable batch
+                             shutdown]
 
   esub/EpidemicSubscriber
   (start [this]
+    (info "Starting Epidemic Subscriber")
     (let [
           _ (println "MESSENGER ID IN SUBSCRIBER: " (epm/get-messenger-id messenger))
           media-driver-dir (:onyx.messaging.aeron/media-driver-dir peer-config)
@@ -79,21 +83,23 @@
           channel (autil/channel "localhost" 40199)
           stream-id 1001
           sub (.addSubscription conn channel stream-id available-image-handler unavailable-image-handler)
+          shutdown (atom false)
           new-subscriber (esub/add-assembler
                            (EpidemicSubscriber.  messenger peer-id peer-config site batch-size incoming-ch read-bytes
                                                 error-counter error bs channel conn sub lost-sessions
-                                                nil stream-id nil nil))
-          shutdown (atom false)
+                                                nil stream-id nil nil shutdown))
           listening-thread (start-subscriber! new-subscriber shutdown peer-config)]
 
     ;(info "Created subscriber" (esub/info new-subscriber))
      new-subscriber))
   (stop [this]
+    (info "Stopping Epidemic Subscriber")
+    (reset! shutdown true)
     (some-> subscription try-close-subscription)
     (some-> conn try-close-conn)
     (EpidemicSubscriber. messenger peer-id peer-config site batch-size incoming-ch (AtomicLong.)
                         (AtomicLong. ) (atom nil) (byte-array (autil/max-message-length))
-                        nil nil nil nil nil nil nil nil))
+                        nil nil nil nil nil nil nil nil nil))
 
   (add-assembler [this]
     (set! assembler (FragmentAssembler. this))
@@ -108,6 +114,8 @@
                           10))
   FragmentHandler
   (onFragment [this buffer offset length header]
+    ;(println (str "LENGTH IN ONFRAGMENT: " length))
+    ;(println (str "CAPACITY OF BUFFER: " (.capacity buffer)))
     (let [message (dummy-deserialize buffer (inc offset) (dec length))]
         (epm/update-log-entries messenger message))))
 
@@ -115,4 +123,4 @@
                                {:keys [site batch-size] :as sub-info} incoming-ch]
   (->EpidemicSubscriber messenger peer-id peer-config site batch-size incoming-ch (AtomicLong.)
                         (AtomicLong. ) (atom nil) (byte-array (autil/max-message-length))
-                        nil nil nil nil nil nil nil nil))
+                        nil nil nil nil nil nil nil nil nil))
