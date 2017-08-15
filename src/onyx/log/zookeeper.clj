@@ -272,21 +272,27 @@
                  (recur))))))))
 
 (defmethod extensions/subscribe-to-log ZooKeeper
-  [{:keys [conn opts prefix kill-ch] :as log} ch]
+  ([{:keys [conn opts prefix kill-ch] :as log} ch & args]
   (let [rets (chan)]
     (thread
      (try
        (let [log-parameters (find-log-parameters log)
              origin (extensions/read-chunk log :origin nil)
-             starting-position (inc (:message-id origin))]
+             starting-position (inc (:message-id origin))
+             read-ch (if (first args) (first args))]
          (onyx.peer.log-version/check-compatible-log-versions! (:log-version log-parameters))
          (>!! rets (merge (:replica origin) log-parameters))
          (close! rets)
          (loop [position starting-position]
            (let [path (str (log-path prefix) "/entry-" (pad-sequential-id position))
-                 new-position (if (zk/exists conn path)
-                                (seek-and-put-entry! log position ch)
-                                (await-entry! log ch path position))]
+                 zoo-seek-and-wait (fn [conn path log position ch]
+                                     (if (zk/exists conn path)
+                                       (seek-and-put-entry! log position ch)
+                                       (await-entry! log ch path position)))
+                 new-position (if read-ch
+                                (when-let [position (<!! read-ch)]
+                                  (zoo-seek-and-wait conn path log position ch))
+                                (zoo-seek-and-wait conn path log position ch))]
              (when-not (= new-position :killed)
                (assert (integer? new-position) new-position)
                (recur new-position)))))
@@ -304,7 +310,7 @@
        (catch Throwable e
          (fatal "extensions/subscribe-to-log threw exception." e)
          (>!! ch e))))
-    (<!! rets)))
+    (<!! rets))))
 
 (defmethod extensions/write-chunk [ZooKeeper :job-hash]
   [{:keys [conn opts prefix monitoring] :as log} kw chunk id]

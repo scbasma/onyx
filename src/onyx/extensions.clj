@@ -50,7 +50,7 @@
 
 (defmulti on-delete (fn [log id ch] (type log)))
 
-(defmulti subscribe-to-log (fn [log ch] (type log)))
+(defmulti subscribe-to-log (fn [log ch & args] (type log)))
 
 (defmulti write-chunk (fn [log kw chunk id] [(type log) kw]))
 

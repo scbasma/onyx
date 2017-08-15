@@ -34,7 +34,9 @@
                  [prismatic/schema "1.0.5"]
                  [com.amazonaws/aws-java-sdk-s3 "1.11.128"]
                  [clj-tuple "0.2.2"]
-                 [clj-fuzzy "0.3.1" :exclusions [org.clojure/clojurescript]]]
+                 [clj-fuzzy "0.3.1" :exclusions [org.clojure/clojurescript]]
+                 [shams/priority-queue "0.1.2"]]
+
   :jvm-opts ^:replace ["-server"
                        "-Xmx2400M"
                        "-XX:+UseG1GC"

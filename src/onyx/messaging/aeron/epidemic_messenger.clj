@@ -89,6 +89,7 @@
                               (assoc log-event :transmitter-list (conj (:transmitter-list log-event) messenger-id))))
       (do
         ;(println "LOG-EVENT: " log-event)
+        (>!! incoming-ch {:self true :message-id (parse-entry log-event)})
         (emp/offer-log-event! messenger (->  log-event
                                             (assoc :transmitter-list (conj [] messenger-id))
                                             (assoc :message-id (parse-entry log-event))

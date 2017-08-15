@@ -26,7 +26,7 @@
                   {:data {:log-info "/log/entry-00000010"}}])
 
 
-(deftest update-log-entry-test
+(deftest ^:broken update-log-entry-test
   (testing "update log entry functions correctly in epidemic messenger")
   (let [config (load-config)
         onyx-id (random-uuid)
