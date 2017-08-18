@@ -17,7 +17,7 @@
 (defn stream-pool [peer-count])
 
 (defn parse-entry [entry]
-  ;(println "PARSE-ENTRY: " entry)
+  (assert (:log-info entry))
   (if (:log-info entry)
     (Integer/parseInt (last (str/split (str/trim (:log-info entry)) #"-")))
     0))
@@ -70,30 +70,21 @@
   (update-log-entries [messenger log-event]
     ;(println (str "inside update-log-entries with log-event: " log-event " and log-entries: " log-entries))
     (when (nil? log-entries) (set! log-entries #{}))
-    (let [earlier-first (parse-entry (first log-entries))
-          new-log-entries (set! log-entries
-                            (reverse (sort-by parse-entry
-                                              (conj log-entries log-event))))
-          ;_ (println (str "log entries in update-log-entries: " log-entries "with messenger id: " messenger-id))
-          new-first (parse-entry (first new-log-entries))]
-      (when (or (> new-first earlier-first) (= (count log-entries) 1))
-        (>!! incoming-ch (if (:message-id (first log-entries))
-                           (first log-entries)
-                           (assoc (first log-entries) :message-id (parse-entry (first log-entries)))))
-        ))
 
-    ;(println (str "Received log-event: " log-event "\n\t in messenger: " messenger-id "\n\t and log-entries: " log-entries))
+    (when (not (some #(= (:log-info %) (:log-info log-event)) log-entries))
+      (set! log-entries (conj log-entries log-event))
+      (if (some #(= messenger-id %) (:transmitter-list log-event))
+        (>!! incoming-ch {:self true :message-id (parse-entry log-event) :messenger-id messenger-id})
+        (>!! incoming-ch (if (:message-id log-event)
+                           log-event
+                           (assoc log-event :message-id (parse-entry log-event))))))
+
+   ; (println (str "Received log-event: " log-event "\n\t in messenger: " messenger-id "\n\t and log-entries: " log-entries))
     (if-let [transmitter-list (:transmitter-list log-event)]
       (if (not (some #(= messenger-id %) (:transmitter-list log-event)))
         (emp/offer-log-event! messenger
                               (assoc log-event :transmitter-list (conj (:transmitter-list log-event) messenger-id))))
-      (do
-        ;(println "LOG-EVENT: " log-event)
-        (>!! incoming-ch {:self true :message-id (parse-entry log-event)})
-        (emp/offer-log-event! messenger (->  log-event
-                                            (assoc :transmitter-list (conj [] messenger-id))
-                                            (assoc :message-id (parse-entry log-event))
-                                           ))))
+      (emp/offer-log-event! messenger log-event))
     messenger)
   (get-latest-log-event [messenger]
     (first log-entries))
@@ -102,12 +93,19 @@
   (get-messenger-id [messenger]
     messenger-id)
   (offer-log-event! [messenger log-event]
-    ;(println "offering log event: " log-event)
+    (println "offering log event: " log-event)
     (assert publisher)
-    (if-let [TTL (:TTL log-event)]
-      (if (not (zero? (dec (:TTL log-event))))
-        (epub/offer-log-event! publisher (assoc log-event :TTL (dec TTL))))
-      (epub/offer-log-event! publisher (assoc log-event :TTL 1))))
+    (let [log-event (cond-> log-event
+                            (not (:message-id log-event)) (assoc :message-id (parse-entry log-event))
+                            (not (:TTL log-event)) (assoc :TTL 1)
+                            (not (:transmitter-list log-event)) (assoc :transmitter-list [messenger-id]))]
+
+      (if (not (zero? (:TTL log-event)))
+        (epub/offer-log-event! publisher (assoc log-event :TTL (dec (:TTL log-event)))))))
+    ;(if-let [TTL (:TTL log-event)]
+    ;  (if (not (zero? (dec (:TTL log-event))))
+    ;    (epub/offer-log-event! publisher (assoc log-event :TTL (dec TTL))))
+    ;  (epub/offer-log-event! publisher (assoc log-event :TTL 1))))
 
   (subscriber [messenger]
     subscriber))

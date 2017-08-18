@@ -266,7 +266,7 @@
               (do 
                (close! read-ch)
                ;; Requires one more check. Watch may have been triggered by a delete
-               ;; from a GC call.
+               ;; from a processes.GC call.
                (if (zk/exists conn path)
                  (seek-and-put-entry! log position ch)
                  (recur))))))))

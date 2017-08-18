@@ -112,16 +112,22 @@
           [dirty-log-entry ch] (alts!! chs :priority true)
           log-entry (clean-entry dirty-log-entry)
           log-entry-pos (:message-id log-entry)
-          ;_ (println "LOG-ENTRY-POS: " log-entry-pos)
+          ;_ (println "RECEIVED LOG ENTRY IN LOOP: " (:message-id log-entry))
+          ;_ (println "POS IN LOOP: " pos)
+          ;_ (println "EVENT QUEUE IN LOOP: " event-queue)
+          ;_ (println "LOG ENTRY POS IN LOOP: " log-entry-pos)
+          ;_ (println "LOG-ENTRY IN LOOP:" log-entry)
           new-event-queue (if (and log-entry-pos (>= log-entry-pos pos))
                             (insert-queue event-queue log-entry)
                             event-queue)]
 
       (cond
 
-        (and (= ch epidemic-inbox-ch) (:self log-entry)) (recur (:message-id log-entry) event-queue)
+        (and (= ch epidemic-inbox-ch) (:self log-entry))
+          (recur (:message-id log-entry) (:queue (pop-queue event-queue (:message-id log-entry))))
 
         (= ch timeout-ch) (do
+                            (println "TIMEOUT")
                             (>!! log-read-ch pos)
                             (recur pos event-queue))
         :else (let [state (pop-queue new-event-queue pos)
@@ -130,8 +136,8 @@
                     new-pos (:pos state)]
                 (if (not (empty? write-queue))
                   (do
-                    (println "WRITE QUEUE: " write-queue)
-                    (println "NEW-EVENT-QUEUE: " new-event-queue)
+                    ;(println "WRITE QUEUE: " write-queue)
+                    ;(println "NEW-EVENT-QUEUE: " new-event-queue)
                     (doall (map #(>!! inbox-ch %) write-queue))
                     (recur new-pos new-event-queue))
                   (recur pos new-event-queue)))))))
@@ -152,9 +158,6 @@
       (if (nil? (:message-id log-entry))
         (println (str "NIL FOR MESSAGE ID: " log-entry " AND FN: " (:fn log-entry))))
      (cond
-
-       (= (:fn log-entry) :set-replica!) (do
-                                           )
 
       (= ch timeout-ch) (do
                           (println "LOG-READ-CH WITH POS: " (inc (:pos entry-state)))

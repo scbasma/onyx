@@ -50,12 +50,17 @@
     (set! stream-id new-stream-id)
     pub)
   (offer-log-event! [this log-event]
+    ;(println "offering log event in publisher!!")
     (let [msg log-event
           ;_ (println "offering log event in publisher..")
           buf (dummy-serialize msg)
           ;_ (println "after buf creation")
           ret (.offer ^Publication publication buf 0 (.capacity buf))]
-      ;(println "ret in offer-log-event: " ret)
+        (loop [ret ret]
+          (if (neg? ret)
+            (do
+              ;(println "negative ret: " ret)
+            (recur (.offer ^Publication publication buf 0 (.capacity buf))))))
       )))
       ;(println (str "Offered log event from epidemic publisher, ret: " ret))
 

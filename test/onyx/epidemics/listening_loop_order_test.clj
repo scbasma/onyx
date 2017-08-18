@@ -15,7 +15,7 @@
                        {:message-id 9}
                        {:message-id 10}])
 
-(def log-entries [{:message-id 0}
+(def log-entries [{:message-id 14}
                   {:message-id 0}
                   {:message-id 3}
                   {:message-id 4}
