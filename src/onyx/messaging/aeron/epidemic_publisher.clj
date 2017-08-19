@@ -34,7 +34,6 @@
           ctx (cond-> (Aeron$Context.)
                       error-handler (.errorHandler error-handler)
                       media-driver-dir (.aeronDirectoryName ^String media-driver-dir))
-          stream-id 1001
           conn (Aeron/connect ctx)
           channel (autil/channel (:address site) (:port site))
           pub (.addPublication conn channel stream-id)]
@@ -59,7 +58,8 @@
         (loop [ret ret]
           (if (neg? ret)
             (do
-              ;(println "negative ret: " ret)
+              (Thread/sleep 1000)
+              (println "negative ret: " ret)
             (recur (.offer ^Publication publication buf 0 (.capacity buf))))))
       )))
       ;(println (str "Offered log event from epidemic publisher, ret: " ret))
@@ -70,4 +70,4 @@
 
 (defn new-epidemic-publisher [peer-config monitoring {:keys [src-peer-id site] :as pub-info}]
   (->EpidemicPublisher peer-config src-peer-id site (:written-bytes monitoring)
-                       (:publication-errors monitoring) nil nil (atom nil) nil))
+                       (:publication-errors monitoring) nil nil (atom nil) (:stream-id pub-info)))

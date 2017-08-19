@@ -14,7 +14,20 @@
   (:import (org.agrona.concurrent BackoffIdleStrategy IdleStrategy)
            (java.util.function Consumer)))
 
-(defn stream-pool [peer-count])
+
+(def stream-base 1001)
+
+(defn pick-streams [peer-count]
+  (assert peer-count)
+  (let [number-streams (int (Math/floor (Math/log peer-count )))
+        stream-pool (map #(+ stream-base %) (if (= number-streams 0)
+                                              (range 1)
+                                              (range number-streams)))]
+    (loop [first-pick (rand-int number-streams) second-pick (rand-int number-streams)]
+      (if (and (= first-pick second-pick) (> number-streams 1))
+        (recur (rand-int number-streams) (rand-int number-streams))
+        [(nth stream-pool first-pick) (nth stream-pool second-pick)]))))
+
 
 (defn parse-entry [entry]
   (assert (:log-info entry))
@@ -31,10 +44,17 @@
   emp/EpidemicMessenger
   (start [this]
     (info "Starting Aeron Epidemic Messenger...")
-      (assert incoming-ch)
+    (assert incoming-ch)
+    (let [streams (pick-streams (if (:peer-number peer-config)
+                                  (:peer-number peer-config)
+                                  1))]
+      (assert (first streams))
+      (assert (second streams))
+      (println "FIRST STREAM: " (first streams))
+      (println "SECOND STREAM: " (second streams))
       (-> (AeronEpidemicMessenger. peer-config messenger-group monitoring incoming-ch messenger-id #{} nil nil)
-          (emp/update-publisher {:stream-id 1001 :site {:address "localhost" :port 40199} :peer-id 1111})
-          (emp/update-subscriber {:stream-id 1001 :site {:address "localhost" :port 40199} :peer-id 1111} incoming-ch) ))
+          (emp/update-publisher {:stream-id (first streams) :site {:address (:onyx.messaging/bind-addr peer-config) :port 40199} :peer-id 1111})
+          (emp/update-subscriber {:stream-id (second streams) :site {:address (:onyx.messaging/bind-addr peer-config) :port 40199} :peer-id 1111} incoming-ch) )))
 
 
   (stop [messenger]
@@ -79,7 +99,7 @@
                            log-event
                            (assoc log-event :message-id (parse-entry log-event))))))
 
-   ; (println (str "Received log-event: " log-event "\n\t in messenger: " messenger-id "\n\t and log-entries: " log-entries))
+    (println (str "Received log-event: " log-event "\n\t in messenger: " messenger-id "\n\t and log-entries: " log-entries))
     (if-let [transmitter-list (:transmitter-list log-event)]
       (if (not (some #(= messenger-id %) (:transmitter-list log-event)))
         (emp/offer-log-event! messenger

@@ -1,4 +1,4 @@
-(defproject org.onyxplatform/onyx "0.10.0-beta17"
+(defproject org.onyxplatform/onyx "0.10.0-epidemics"
   :description "Distributed, masterless, high performance, fault tolerant data processing for Clojure"
   ;:main onyx.messaging.aeron-media-driver
   :url "https://github.com/onyx-platform/onyx"

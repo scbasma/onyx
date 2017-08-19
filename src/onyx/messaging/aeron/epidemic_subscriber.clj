@@ -80,8 +80,12 @@
           unavailable-image-handler (unavailable-image sinfo)
           conn (Aeron/connect ctx)
           _ (println "PEER CONFIG IN SUB: " peer-config)
-          channel (autil/channel "localhost" 40199)
-          stream-id 1001
+          _ (println "STREAM ID IN SUB: " stream-id)
+
+         channel (autil/channel (:address site) 40199)
+
+
+
           sub (.addSubscription conn channel stream-id available-image-handler unavailable-image-handler)
           shutdown (atom false)
           new-subscriber (esub/add-assembler
@@ -123,4 +127,4 @@
                                {:keys [site batch-size] :as sub-info} incoming-ch]
   (->EpidemicSubscriber messenger peer-id peer-config site batch-size incoming-ch (AtomicLong.)
                         (AtomicLong. ) (atom nil) (byte-array (autil/max-message-length))
-                        nil nil nil nil nil nil nil nil nil))
+                        nil nil nil nil nil (:stream-id sub-info) nil nil nil))

@@ -39,29 +39,29 @@
         epidemic-ch-1 (chan 100)
         epidemic-ch-2 (chan 100)
         liveness-timeout 200
-        peer-config {:onyx.messaging.aeron/embedded-driver? false
-                 :onyx.messaging.aeron/embedded-media-driver-threading :shared
-                 :onyx.messaging/peer-port 40199
-                 :onyx.messaging/bind-addr "127.0.0.1"
-                 :onyx.peer/subscriber-liveness-timeout-ms liveness-timeout
-                 :onyx.peer/publisher-liveness-timeout-ms liveness-timeout
-                 :onyx.messaging/impl :aeron}
+        peer-config {:onyx.messaging.aeron/embedded-driver? true
+                     :onyx.messaging.aeron/embedded-media-driver-threading :shared
+                     :onyx.messaging/peer-port 40199
+                     :onyx.messaging/bind-addr "127.0.0.1"
+                     :onyx.peer/subscriber-liveness-timeout-ms liveness-timeout
+                     :onyx.peer/publisher-liveness-timeout-ms liveness-timeout
+                     :onyx.messaging/impl :aeron
+                     :peer-number 2}
 
-        ;media-driver (component/start (em/->EmbeddedMediaDriver peer-config))
-         ]
-    ;(try
-      (let [
+        media-driver (component/start (em/->EmbeddedMediaDriver peer-config))
+
       messenger-1 (build-aeron-epidemic-messenger peer-config nil nil epidemic-ch-1)
       messenger-2 (build-aeron-epidemic-messenger peer-config nil nil epidemic-ch-2)]
+
         (try
            (is (empty? (epm/get-all-log-events messenger-1)))
            (is (empty? (epm/get-all-log-events messenger-2)))
-           (is (= (:message-id (first log-entries)) (:message-id (epm/get-latest-log-event (epm/update-log-entries messenger-1 (first log-entries)))) ))
+           (is (= (:message-id (first log-entries)) (:message-id (epm/get-latest-log-event (epm/update-log-entries messenger-1 (first log-entries))))))
            (println "after first test!!")
            (when-let [received-entry (<!! epidemic-ch-2)]
              (println "received entry: " received-entry)
-            (is (= (:message-id (first log-entries)) (:message-id received-entry)))
-            )
+            (is (= (:message-id (first log-entries)) (:message-id received-entry))))
+
            (println "after second test!!")
           ; (epm/update-log-entries messenger-1 (first log-entries))
            (doall (map #(epm/update-log-entries messenger-1 %) log-entries))
@@ -77,6 +77,7 @@
              (is (= (:message-id (last log-entries) (:message-id (last messenger-2-entries))))))
            (finally
             (epm/stop messenger-1)
-            (epm/stop messenger-2))))))
+            (epm/stop messenger-2)
+            (component/stop media-driver)))))
       ;(finally
         ;(component/stop media-driver)))))
